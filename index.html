@@ -173,6 +173,23 @@
         .footer a:hover {
             text-decoration: underline;
         }
+        .debug {
+            font-family: monospace;
+            font-size: 11px;
+            color: #5B677E;
+            margin-top: 12px;
+            padding: 8px;
+            background: #0A0F1C;
+            border-radius: 6px;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .debug.visible {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -203,10 +220,12 @@
         <div class="footer">
             All processing happens locally · <a href="#" id="downloadLink" style="display:none;">Download report</a>
         </div>
+
+        <div class="debug" id="debug"></div>
     </div>
 
-    <!-- Use a different Parquet library that works in browsers -->
-    <script src="https://cdn.jsdelivr.net/npm/parquetjs@0.11.2/lib/parquet.min.js"></script>
+    <!-- Try loading parquetjs from unpkg (sometimes works better) -->
+    <script src="https://unpkg.com/parquetjs@0.11.2/lib/parquet.min.js"></script>
     <script>
         // ============================================================
         //  STATE
@@ -228,14 +247,20 @@
         const progress = document.getElementById('progress');
         const progressBar = document.getElementById('progressBar');
         const downloadLink = document.getElementById('downloadLink');
+        const debug = document.getElementById('debug');
 
-        console.log('DOM elements loaded');
+        function debugLog(msg) {
+            console.log(msg);
+            debug.textContent += msg + '\n';
+            debug.classList.add('visible');
+            debug.scrollTop = debug.scrollHeight;
+        }
 
         // ============================================================
         //  STATUS HELPER
         // ============================================================
         function setStatus(msg, type = '') {
-            console.log('Status:', msg, type);
+            debugLog('Status: ' + msg + (type ? ' (' + type + ')' : ''));
             status.textContent = msg;
             status.className = 'status' + (type ? ' ' + type : '');
         }
@@ -254,7 +279,7 @@
         //  PARQUET READER (using parquetjs)
         // ============================================================
         async function readParquetFile(file) {
-            console.log('Reading file:', file.name, file.size, 'bytes');
+            debugLog('Reading file: ' + file.name + ' (' + file.size + ' bytes)');
             
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -263,9 +288,22 @@
                         const arrayBuffer = e.target.result;
                         const uint8Array = new Uint8Array(arrayBuffer);
                         
+                        // Check if parquetjs is available
+                        if (typeof parquetjs === 'undefined') {
+                            // Try to get it from window
+                            if (typeof window.parquetjs !== 'undefined') {
+                                window.parquet = window.parquetjs;
+                            } else {
+                                throw new Error('parquetjs library not loaded. Please refresh.');
+                            }
+                        }
+                        
+                        const parquet = window.parquetjs || parquetjs;
+                        debugLog('Parsing Parquet file...');
+                        
                         // Parse using parquetjs
-                        const parquet = await parquetjs.ParquetReader.fromBuffer(uint8Array);
-                        const cursor = parquet.getCursor();
+                        const reader = await parquet.ParquetReader.fromBuffer(uint8Array);
+                        const cursor = reader.getCursor();
                         const records = [];
                         let record = null;
                         
@@ -273,16 +311,16 @@
                             records.push(record);
                         }
                         
-                        await parquet.close();
-                        console.log('Read', records.length, 'rows from', file.name);
+                        await reader.close();
+                        debugLog('Read ' + records.length + ' rows from ' + file.name);
                         resolve(records);
                     } catch (err) {
-                        console.error('Error parsing parquet:', err);
+                        debugLog('Error parsing parquet: ' + err.message);
                         reject(err);
                     }
                 };
                 reader.onerror = function(err) {
-                    console.error('FileReader error:', err);
+                    debugLog('FileReader error: ' + err.message);
                     reject(err);
                 };
                 reader.readAsArrayBuffer(file);
@@ -301,14 +339,21 @@
         }
 
         async function handleFiles(files) {
-            console.log('handleFiles called with', files.length, 'files');
+            debugLog('handleFiles called with ' + files.length + ' files');
+
+            // Check if parquetjs is loaded
+            if (typeof parquetjs === 'undefined' && typeof window.parquetjs === 'undefined') {
+                setStatus('❌ Parquet library not loaded. Please refresh the page.', 'error');
+                debugLog('parquetjs is not defined');
+                return;
+            }
 
             for (const file of files) {
-                console.log('Processing file:', file.name);
+                debugLog('Processing file: ' + file.name);
                 const type = getFileType(file.name);
                 
                 if (!type) {
-                    setStatus(`Skipping "${file.name}" — not recognized (expected disk.parquet, cpu_ram.parquet, or network.parquet)`, 'error');
+                    setStatus(`Skipping "${file.name}" — not recognized`, 'error');
                     continue;
                 }
 
@@ -325,14 +370,14 @@
                     renderFileList();
                     updateGenerateButton();
                 } catch (err) {
-                    console.error('Error reading file:', err);
+                    debugLog('Error reading file: ' + err.message);
                     setStatus(`❌ Error reading ${file.name}: ${err.message}`, 'error');
                 }
             }
         }
 
         function removeFile(type) {
-            console.log('Removing file:', type);
+            debugLog('Removing file: ' + type);
             delete state.files[type];
             renderFileList();
             updateGenerateButton();
@@ -341,7 +386,7 @@
 
         function renderFileList() {
             const types = Object.keys(state.files);
-            console.log('Rendering file list:', types);
+            debugLog('Rendering file list: ' + types.join(', '));
             
             if (types.length === 0) {
                 fileList.innerHTML = '';
@@ -358,11 +403,15 @@
 
         function updateGenerateButton() {
             const hasAny = !!state.files.disk || !!state.files.cpu_ram || !!state.files.network;
-            console.log('Update generate button, hasAny:', hasAny, 'template loaded:', !!state.templateHtml);
+            debugLog('Update generate button: hasAny=' + hasAny + ', templateLoaded=' + !!state.templateHtml);
             
-            generateBtn.disabled = !hasAny || !state.templateHtml;
+            const parquetLoaded = typeof parquetjs !== 'undefined' || typeof window.parquetjs !== 'undefined';
             
-            if (hasAny && state.templateHtml) {
+            generateBtn.disabled = !hasAny || !state.templateHtml || !parquetLoaded;
+            
+            if (!parquetLoaded) {
+                generateBtn.textContent = '⏳ Loading Parquet library...';
+            } else if (hasAny && state.templateHtml) {
                 const parts = [];
                 if (state.files.disk) parts.push('Disk');
                 if (state.files.cpu_ram) parts.push('CPU/RAM');
@@ -379,65 +428,55 @@
         //  EVENT HANDLERS
         // ============================================================
 
-        // Click to upload
         uploadZone.addEventListener('click', function(e) {
-            console.log('Upload zone clicked');
+            debugLog('Upload zone clicked');
             fileInput.click();
         });
 
-        // Drag over
         uploadZone.addEventListener('dragover', function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Drag over');
             uploadZone.classList.add('dragover');
         });
 
-        // Drag leave
         uploadZone.addEventListener('dragleave', function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Drag leave');
             uploadZone.classList.remove('dragover');
         });
 
-        // Drop
         uploadZone.addEventListener('drop', function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Drop event');
+            debugLog('Drop event');
             uploadZone.classList.remove('dragover');
             
             const files = e.dataTransfer.files;
-            console.log('Files dropped:', files.length);
+            debugLog('Files dropped: ' + files.length);
             
             if (files.length > 0) {
                 handleFiles(files);
             }
         });
 
-        // File input change
         fileInput.addEventListener('change', function(e) {
-            console.log('File input change');
+            debugLog('File input change');
             const files = e.target.files;
-            console.log('Selected files:', files.length);
+            debugLog('Selected files: ' + files.length);
             
             if (files.length > 0) {
                 handleFiles(files);
             }
-            // Reset so user can select the same file again
             fileInput.value = '';
         });
 
-        // Generate button
         generateBtn.addEventListener('click', function() {
-            console.log('Generate button clicked');
+            debugLog('Generate button clicked');
             generateReport();
         });
 
-        // Reset button
         resetBtn.addEventListener('click', function() {
-            console.log('Reset button clicked');
+            debugLog('Reset button clicked');
             state.files = {};
             renderFileList();
             updateGenerateButton();
@@ -454,36 +493,187 @@
 
         async function loadTemplate() {
             try {
-                console.log('Loading report template...');
+                debugLog('Loading report template...');
                 setStatus('Loading template...', '');
                 const response = await fetch('report_template.html');
                 if (!response.ok) throw new Error('Template not found (HTTP ' + response.status + ')');
                 state.templateHtml = await response.text();
-                console.log('Template loaded, length:', state.templateHtml.length);
+                debugLog('Template loaded, length: ' + state.templateHtml.length);
                 setStatus('✅ Template loaded', 'success');
                 updateGenerateButton();
             } catch (err) {
-                console.error('Failed to load template:', err);
+                debugLog('Failed to load template: ' + err.message);
                 setStatus(`❌ Error loading template: ${err.message}`, 'error');
                 generateBtn.textContent = '⚠️ Template missing';
             }
         }
 
         // ============================================================
-        //  DATA PROCESSING (will be added)
+        //  DATA PROCESSING
         // ============================================================
 
         function processUtilizationData(rows, metricTypeFilter = null) {
-            // Will implement this after testing upload works
-            console.log('Processing utilization data...');
-            return { rows: rows.length, metricTypeFilter };
+            if (!rows || rows.length === 0) return null;
+
+            let df = rows;
+            if (metricTypeFilter && rows[0] && rows[0].metric_type !== undefined) {
+                df = rows.filter(r => r.metric_type === metricTypeFilter);
+            }
+            if (df.length === 0) return null;
+
+            const records = df.map(r => {
+                const ts = new Date(r.time || r.timestamp);
+                return {
+                    timestamp: isNaN(ts.getTime()) ? null : ts,
+                    instance_ip: r.instance || r.instance_ip || 'unknown',
+                    usage_pct: parseFloat(r['value_%'] || r.disk_usage_% || r.usage_pct || 0),
+                    partition: r.device || r.partition || null
+                };
+            }).filter(r => r.timestamp && !isNaN(r.usage_pct));
+
+            if (records.length === 0) return null;
+
+            const hasPartitions = records.some(r => r.partition);
+            const grouped = {};
+
+            for (const row of records) {
+                const key = hasPartitions
+                    ? `${row.timestamp.toISOString()}|${row.instance_ip}|${row.partition}`
+                    : `${row.timestamp.toISOString()}|${row.instance_ip}`;
+                if (!grouped[key]) {
+                    grouped[key] = { ...row, count: 0, sum: 0 };
+                }
+                grouped[key].sum += row.usage_pct;
+                grouped[key].count += 1;
+            }
+
+            const averaged = Object.values(grouped).map(g => ({
+                ...g,
+                usage_pct: g.sum / g.count
+            }));
+            averaged.sort((a, b) => a.timestamp - b.timestamp);
+
+            const timestamps = [];
+            const series = {};
+            const instanceList = new Set();
+            const partitionsByInstance = {};
+            const instanceAverages = {};
+
+            for (const row of averaged) {
+                const ts = row.timestamp.toISOString();
+                if (!timestamps.includes(ts)) timestamps.push(ts);
+
+                const ip = row.instance_ip;
+                instanceList.add(ip);
+
+                if (hasPartitions) {
+                    const part = row.partition || 'root';
+                    if (!series[ip]) series[ip] = {};
+                    if (!series[ip][part]) series[ip][part] = [];
+                    series[ip][part].push(row.usage_pct);
+                    if (!partitionsByInstance[ip]) partitionsByInstance[ip] = new Set();
+                    partitionsByInstance[ip].add(part);
+                } else {
+                    if (!series[ip]) series[ip] = [];
+                    series[ip].push(row.usage_pct);
+                }
+            }
+
+            for (const ip of instanceList) {
+                if (partitionsByInstance[ip]) {
+                    partitionsByInstance[ip] = Array.from(partitionsByInstance[ip]).sort();
+                }
+                let values = [];
+                if (hasPartitions) {
+                    for (const part in series[ip]) {
+                        values = values.concat(series[ip][part]);
+                    }
+                } else {
+                    values = series[ip];
+                }
+                values = values.filter(v => v !== null && v !== undefined && !isNaN(v));
+                instanceAverages[ip] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+            }
+
+            return {
+                page_type: 'utilization',
+                has_partitions: hasPartitions,
+                timestamps: timestamps,
+                series: series,
+                instance_list: Array.from(instanceList),
+                instance_averages: instanceAverages,
+                partitions_by_instance: partitionsByInstance,
+                date_min: timestamps.length ? timestamps[0].slice(0, 10) : '',
+                date_max: timestamps.length ? timestamps[timestamps.length - 1].slice(0, 10) : '',
+                nodes_total: instanceList.size,
+            };
         }
 
         function processNetworkData(rows) {
-            // Will implement this after testing upload works
-            console.log('Processing network data...');
-            return { rows: rows.length };
+            if (!rows || rows.length === 0) return null;
+
+            const records = rows.map(r => ({
+                timestamp: new Date(r.time || r.timestamp),
+                instance: r.instance || r.instance_ip || 'unknown',
+                direction: r.traffic_direction || 'unknown',
+                bits_per_sec: parseFloat(r.value_bits_per_sec || r.bits_per_sec || 0),
+                server_name: r.server_name || '',
+                interface: r.interface || '',
+            })).filter(r => r.timestamp && !isNaN(r.timestamp) && !isNaN(r.bits_per_sec));
+
+            if (records.length === 0) return null;
+
+            const grouped = {};
+            for (const row of records) {
+                const key = `${row.timestamp.toISOString()}|${row.instance}|${row.direction}`;
+                if (!grouped[key]) {
+                    grouped[key] = { ...row, sum: 0, count: 0 };
+                }
+                grouped[key].sum += row.bits_per_sec;
+                grouped[key].count += 1;
+            }
+
+            const averaged = Object.values(grouped).map(g => ({
+                ...g,
+                bits_per_sec: g.sum
+            }));
+            averaged.sort((a, b) => a.timestamp - b.timestamp);
+
+            const timestamps = [];
+            const timestampSet = new Set();
+            const series = {};
+            const instanceList = new Set();
+            const directions = new Set();
+
+            for (const row of averaged) {
+                const ts = row.timestamp.toISOString();
+                if (!timestampSet.has(ts)) {
+                    timestampSet.add(ts);
+                    timestamps.push(ts);
+                }
+                const ip = row.instance;
+                instanceList.add(ip);
+                directions.add(row.direction);
+                if (!series[ip]) series[ip] = {};
+                if (!series[ip][row.direction]) series[ip][row.direction] = [];
+                series[ip][row.direction].push(row.bits_per_sec);
+            }
+
+            return {
+                page_type: 'network',
+                timestamps: timestamps,
+                directions: Array.from(directions),
+                series: series,
+                instance_list: Array.from(instanceList),
+                date_min: timestamps.length ? timestamps[0].slice(0, 10) : '',
+                date_max: timestamps.length ? timestamps[timestamps.length - 1].slice(0, 10) : '',
+                nodes_total: instanceList.size,
+            };
         }
+
+        // ============================================================
+        //  GZIP COMPRESSION
+        // ============================================================
 
         async function gzipCompress(str) {
             const bytes = new TextEncoder().encode(str);
@@ -493,43 +683,84 @@
         }
 
         // ============================================================
-        //  GENERATE REPORT (simplified for testing)
+        //  GENERATE REPORT
         // ============================================================
 
         async function generateReport() {
-            console.log('generateReport called with files:', Object.keys(state.files));
+            debugLog('generateReport called with files: ' + Object.keys(state.files).join(', '));
             setStatus('Generating report...', '');
             
             try {
                 const reportData = {};
-                
-                // Process each file
+                let totalSteps = 0;
+                let completedSteps = 0;
+
+                if (state.files.disk) totalSteps++;
+                if (state.files.cpu_ram) totalSteps += 2;
+                if (state.files.network) totalSteps++;
+
+                setProgress(0);
+
                 if (state.files.disk) {
-                    reportData.disk = processUtilizationData(state.files.disk);
+                    try {
+                        const result = processUtilizationData(state.files.disk);
+                        reportData.disk = result;
+                        completedSteps++;
+                        setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed disk data');
+                    } catch (err) {
+                        debugLog('Error processing disk: ' + err.message);
+                        setStatus(`❌ Error processing disk: ${err.message}`, 'error');
+                        return;
+                    }
                 }
+
                 if (state.files.cpu_ram) {
-                    reportData.cpu = processUtilizationData(state.files.cpu_ram, 'CPU');
-                    reportData.ram = processUtilizationData(state.files.cpu_ram, 'RAM');
+                    try {
+                        const cpu = processUtilizationData(state.files.cpu_ram, 'CPU');
+                        const ram = processUtilizationData(state.files.cpu_ram, 'RAM');
+                        reportData.cpu = cpu;
+                        reportData.ram = ram;
+                        completedSteps += 2;
+                        setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed CPU/RAM data');
+                    } catch (err) {
+                        debugLog('Error processing CPU/RAM: ' + err.message);
+                        setStatus(`❌ Error processing CPU/RAM: ${err.message}`, 'error');
+                        return;
+                    }
                 }
+
                 if (state.files.network) {
-                    reportData.network = processNetworkData(state.files.network);
+                    try {
+                        const result = processNetworkData(state.files.network);
+                        reportData.network = result;
+                        completedSteps++;
+                        setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed network data');
+                    } catch (err) {
+                        debugLog('Error processing network: ' + err.message);
+                        setStatus(`❌ Error processing network: ${err.message}`, 'error');
+                        return;
+                    }
                 }
+
+                setStatus('Building HTML report...', '');
 
                 const activePage = reportData.disk ? 'disk' :
                                   reportData.cpu ? 'cpu' :
                                   reportData.network ? 'network' : 'disk';
 
-                // Compress the data
                 const jsonStr = JSON.stringify(reportData);
                 const compressed = await gzipCompress(jsonStr);
                 const b64 = btoa(String.fromCharCode(...compressed));
 
-                // Inject data into template
+                debugLog('Data compressed, size: ' + compressed.length + ' bytes');
+
                 let html = state.templateHtml;
                 html = html.replace('const REPORT_DATA_B64 = \'\';', `const REPORT_DATA_B64 = '${b64}';`);
                 html = html.replace('const ACTIVE_PAGE = \'\';', `const ACTIVE_PAGE = '${activePage}';`);
 
-                // Download
                 const blob = new Blob([html], { type: 'text/html' });
                 const url = URL.createObjectURL(blob);
                 downloadLink.href = url;
@@ -542,9 +773,28 @@
                 generateBtn.disabled = true;
                 hideProgress();
                 
+                debugLog('Report generation complete');
+                
             } catch (err) {
-                console.error('Error generating report:', err);
+                debugLog('Error generating report: ' + err.message);
                 setStatus('❌ Error generating report: ' + err.message, 'error');
+            }
+        }
+
+        // ============================================================
+        //  CHECK PARQUET LIBRARY LOADED
+        // ============================================================
+
+        function checkParquetLoaded() {
+            if (typeof parquetjs !== 'undefined' || typeof window.parquetjs !== 'undefined') {
+                debugLog('✅ parquetjs library loaded');
+                setStatus('✅ Parquet library ready', 'success');
+                updateGenerateButton();
+                return true;
+            } else {
+                debugLog('⏳ Waiting for parquetjs to load...');
+                setTimeout(checkParquetLoaded, 500);
+                return false;
             }
         }
 
@@ -553,14 +803,17 @@
         // ============================================================
 
         async function init() {
-            console.log('Initializing...');
+            debugLog('Initializing...');
             
-            // Load template first
+            // Load template
             await loadTemplate();
+            
+            // Check for parquetjs
+            setTimeout(checkParquetLoaded, 100);
             
             setStatus('Ready — upload your Parquet files', '');
             updateGenerateButton();
-            console.log('Initialization complete');
+            debugLog('Initialization complete');
         }
 
         // Start the app
