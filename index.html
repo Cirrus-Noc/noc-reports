@@ -190,6 +190,18 @@
         .debug.visible {
             display: block;
         }
+        .warning {
+            background: rgba(245, 184, 78, 0.1);
+            border: 1px solid rgba(245, 184, 78, 0.3);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 12px 0;
+            color: #F5B84E;
+            font-size: 14px;
+        }
+        .warning a {
+            color: #2FD4C4;
+        }
     </style>
 </head>
 <body>
@@ -197,6 +209,11 @@
     <div class="container">
         <div class="logo">Cirrus</div>
         <p class="subtitle">Generate infrastructure reports from Parquet files — entirely in your browser</p>
+
+        <div class="warning" id="warningBanner">
+            ⚠️ <strong>Note:</strong> Parquet parsing in browsers requires WebAssembly. 
+            If you see errors, try <a href="#" id="refreshLink">refreshing</a> or using Chrome/Edge.
+        </div>
 
         <div class="upload-zone" id="uploadZone">
             <span class="icon">📁</span>
@@ -224,34 +241,62 @@
         <div class="debug" id="debug"></div>
     </div>
 
-    <script type="importmap">
-    {
-        "imports": {
-            "parquet-wasm": "https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js"
-        }
-    }
+    <script>
+    // ============================================================
+    //  FALLBACK: Try loading parquet-wasm via script tag
+    // ============================================================
+    (function() {
+        console.log('Attempting to load parquet-wasm...');
+        
+        // Try loading from unpkg (sometimes works better than jsdelivr)
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/parquet-wasm@0.6.1/parquet_wasm.js';
+        script.type = 'text/javascript';
+        script.async = true;
+        
+        script.onload = function() {
+            console.log('Parquet WASM loaded via script tag');
+            if (window.parquet_wasm) {
+                window.parquetLoaded = true;
+                window.parquet = window.parquet_wasm;
+                document.dispatchEvent(new Event('parquet-ready'));
+            }
+        };
+        
+        script.onerror = function() {
+            console.error('Failed to load parquet-wasm from unpkg');
+            // Try jsdelivr as fallback
+            const script2 = document.createElement('script');
+            script2.src = 'https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/parquet_wasm.js';
+            script2.type = 'text/javascript';
+            script2.async = true;
+            script2.onload = function() {
+                console.log('Parquet WASM loaded via jsdelivr');
+                if (window.parquet_wasm) {
+                    window.parquetLoaded = true;
+                    window.parquet = window.parquet_wasm;
+                    document.dispatchEvent(new Event('parquet-ready'));
+                }
+            };
+            script2.onerror = function() {
+                console.error('Failed to load parquet-wasm from jsdelivr too');
+                document.dispatchEvent(new Event('parquet-failed'));
+            };
+            document.head.appendChild(script2);
+        };
+        
+        document.head.appendChild(script);
+    })();
     </script>
 
-    <script type="module">
-        // ============================================================
-        //  IMPORTS
-        // ============================================================
-        let parquet = null;
-        try {
-            const module = await import('parquet-wasm');
-            parquet = module;
-            console.log('Parquet WASM loaded successfully');
-        } catch (err) {
-            console.error('Failed to load Parquet WASM:', err);
-            // We'll handle this gracefully
-        }
-
+    <script>
         // ============================================================
         //  STATE
         // ============================================================
         const state = {
             files: {},
             templateHtml: null,
+            parquetReady: false,
         };
 
         // ============================================================
@@ -267,12 +312,19 @@
         const progressBar = document.getElementById('progressBar');
         const downloadLink = document.getElementById('downloadLink');
         const debug = document.getElementById('debug');
+        const refreshLink = document.getElementById('refreshLink');
+
+        if (refreshLink) {
+            refreshLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                location.reload();
+            });
+        }
 
         function debugLog(msg) {
             console.log(msg);
             debug.textContent += msg + '\n';
             debug.classList.add('visible');
-            // Auto-scroll to bottom
             debug.scrollTop = debug.scrollHeight;
         }
 
@@ -296,24 +348,23 @@
         }
 
         // ============================================================
-        //  PARQUET READER (using parquet-wasm via ESM)
+        //  PARQUET READER
         // ============================================================
         async function readParquetFile(file) {
             debugLog('Reading file: ' + file.name + ' (' + file.size + ' bytes)');
             
             try {
-                // Read file as ArrayBuffer
                 const buffer = await file.arrayBuffer();
                 const bytes = new Uint8Array(buffer);
                 
-                if (!parquet) {
-                    throw new Error('Parquet WASM not loaded. Please refresh and try again.');
+                if (!window.parquet) {
+                    throw new Error('Parquet WASM not loaded');
                 }
                 
                 debugLog('Creating Parquet reader...');
                 
-                // Use parquet-wasm to read
-                const reader = parquet.ParquetReader.fromBytes(bytes);
+                // Use the loaded parquet wasm
+                const reader = window.parquet.ParquetReader.fromBytes(bytes);
                 const records = reader.readAll();
                 
                 debugLog('Read ' + records.length + ' rows from ' + file.name);
@@ -338,8 +389,8 @@
         async function handleFiles(files) {
             debugLog('handleFiles called with ' + files.length + ' files');
 
-            if (!parquet) {
-                setStatus('❌ Parquet parser not loaded. Please refresh the page.', 'error');
+            if (!state.parquetReady) {
+                setStatus('⏳ Parquet parser still loading. Please wait...', 'error');
                 return;
             }
 
@@ -348,7 +399,7 @@
                 const type = getFileType(file.name);
                 
                 if (!type) {
-                    setStatus(`Skipping "${file.name}" — not recognized (expected disk.parquet, cpu_ram.parquet, or network.parquet)`, 'error');
+                    setStatus(`Skipping "${file.name}" — not recognized`, 'error');
                     continue;
                 }
 
@@ -398,21 +449,22 @@
 
         function updateGenerateButton() {
             const hasAny = !!state.files.disk || !!state.files.cpu_ram || !!state.files.network;
-            debugLog('Update generate button: hasAny=' + hasAny + ', templateLoaded=' + !!state.templateHtml + ', parquetLoaded=' + !!parquet);
             
-            generateBtn.disabled = !hasAny || !state.templateHtml || !parquet;
-            
-            if (!parquet) {
+            if (!state.parquetReady) {
+                generateBtn.disabled = true;
                 generateBtn.textContent = '⏳ Loading Parquet parser...';
             } else if (hasAny && state.templateHtml) {
+                generateBtn.disabled = false;
                 const parts = [];
                 if (state.files.disk) parts.push('Disk');
                 if (state.files.cpu_ram) parts.push('CPU/RAM');
                 if (state.files.network) parts.push('Network');
                 generateBtn.textContent = `📊 Generate Report (${parts.join(', ')})`;
             } else if (!state.templateHtml) {
+                generateBtn.disabled = true;
                 generateBtn.textContent = '⏳ Loading template...';
             } else {
+                generateBtn.disabled = true;
                 generateBtn.textContent = '📊 Upload Parquet files to start';
             }
         }
@@ -421,27 +473,23 @@
         //  EVENT HANDLERS
         // ============================================================
 
-        // Click to upload
         uploadZone.addEventListener('click', function(e) {
             debugLog('Upload zone clicked');
             fileInput.click();
         });
 
-        // Drag over
         uploadZone.addEventListener('dragover', function(e) {
             e.preventDefault();
             e.stopPropagation();
             uploadZone.classList.add('dragover');
         });
 
-        // Drag leave
         uploadZone.addEventListener('dragleave', function(e) {
             e.preventDefault();
             e.stopPropagation();
             uploadZone.classList.remove('dragover');
         });
 
-        // Drop
         uploadZone.addEventListener('drop', function(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -456,7 +504,6 @@
             }
         });
 
-        // File input change
         fileInput.addEventListener('change', function(e) {
             debugLog('File input change');
             const files = e.target.files;
@@ -468,13 +515,11 @@
             fileInput.value = '';
         });
 
-        // Generate button
         generateBtn.addEventListener('click', function() {
             debugLog('Generate button clicked');
             generateReport();
         });
 
-        // Reset button
         resetBtn.addEventListener('click', function() {
             debugLog('Reset button clicked');
             state.files = {};
@@ -509,7 +554,7 @@
         }
 
         // ============================================================
-        //  DATA PROCESSING (ported from genReport.py)
+        //  DATA PROCESSING
         // ============================================================
 
         function processUtilizationData(rows, metricTypeFilter = null) {
@@ -751,19 +796,16 @@
                                   reportData.cpu ? 'cpu' :
                                   reportData.network ? 'network' : 'disk';
 
-                // Compress the data
                 const jsonStr = JSON.stringify(reportData);
                 const compressed = await gzipCompress(jsonStr);
                 const b64 = btoa(String.fromCharCode(...compressed));
 
                 debugLog('Data compressed, size: ' + compressed.length + ' bytes');
 
-                // Inject data into template
                 let html = state.templateHtml;
                 html = html.replace('const REPORT_DATA_B64 = \'\';', `const REPORT_DATA_B64 = '${b64}';`);
                 html = html.replace('const ACTIVE_PAGE = \'\';', `const ACTIVE_PAGE = '${activePage}';`);
 
-                // Download
                 const blob = new Blob([html], { type: 'text/html' });
                 const url = URL.createObjectURL(blob);
                 downloadLink.href = url;
@@ -785,29 +827,58 @@
         }
 
         // ============================================================
+        //  PARQUET READY / FAILED EVENTS
+        // ============================================================
+
+        document.addEventListener('parquet-ready', function() {
+            debugLog('✅ Parquet WASM ready!');
+            state.parquetReady = true;
+            setStatus('✅ Parquet parser ready!', 'success');
+            updateGenerateButton();
+        });
+
+        document.addEventListener('parquet-failed', function() {
+            debugLog('❌ Parquet WASM failed to load');
+            state.parquetReady = false;
+            setStatus('❌ Parquet parser failed to load. Try Chrome or Edge.', 'error');
+            generateBtn.textContent = '❌ Parquet parser unavailable';
+        });
+
+        // ============================================================
         //  INIT
         // ============================================================
 
         async function init() {
             debugLog('Initializing...');
             
-            // Check if Parquet WASM loaded
-            if (parquet) {
-                debugLog('✅ Parquet WASM loaded');
-            } else {
-                debugLog('❌ Parquet WASM failed to load');
-                setStatus('⚠️ Parquet parser failed to load. Please refresh.', 'error');
-            }
-            
             // Load template
             await loadTemplate();
             
-            setStatus('Ready — upload your Parquet files', '');
-            updateGenerateButton();
+            // Check if parquet loaded via script tag
+            if (window.parquetLoaded) {
+                debugLog('✅ Parquet WASM already loaded');
+                state.parquetReady = true;
+                setStatus('✅ Parquet parser ready!', 'success');
+                updateGenerateButton();
+            } else {
+                // Wait for parquet-ready event
+                debugLog('⏳ Waiting for Parquet WASM to load...');
+                setStatus('⏳ Loading Parquet parser...', '');
+            }
+            
+            // Also check after 5 seconds if it loaded but event didn't fire
+            setTimeout(() => {
+                if (window.parquet && !state.parquetReady) {
+                    debugLog('✅ Parquet WASM detected (late)');
+                    state.parquetReady = true;
+                    setStatus('✅ Parquet parser ready!', 'success');
+                    updateGenerateButton();
+                }
+            }, 5000);
+            
             debugLog('Initialization complete');
         }
 
-        // Start the app
         init();
     </script>
 </body>
