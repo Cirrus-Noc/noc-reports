@@ -168,6 +168,9 @@
             color: #2FD4C4;
             text-decoration: none;
         }
+        .footer a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -176,6 +179,7 @@
     <h1>🚀 Cirrus</h1>
     <p class="subtitle">Generate infrastructure reports from Parquet files — entirely in your browser</p>
 
+    <!-- Upload Zone -->
     <div class="upload-zone" id="uploadZone">
         <span class="icon">📁</span>
         <p><strong>Drop your Parquet files here</strong> or click to browse</p>
@@ -184,14 +188,18 @@
 
     <input type="file" id="fileInput" multiple accept=".parquet">
 
+    <!-- File List -->
     <div class="file-list" id="fileList"></div>
 
+    <!-- Status -->
     <div class="status" id="status">Ready to generate report</div>
 
+    <!-- Progress -->
     <div class="progress" id="progress">
         <div class="bar" id="progressBar"></div>
     </div>
 
+    <!-- Buttons -->
     <button class="btn" id="generateBtn" disabled>📊 Generate Report</button>
     <button class="btn secondary" id="resetBtn" style="display:none;">🔄 Start Over</button>
 
@@ -200,16 +208,24 @@
     </div>
 </div>
 
+<!-- ============================================================ -->
+<!--  Scripts -->
+<!-- ============================================================ -->
+
 <script src="https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/parquet_wasm.js"></script>
-
 <script>
-
+    // ============================================================
+    //  STATE
+    // ============================================================
     const state = {
         files: {},
         processed: false,
         reportHtml: null,
     };
 
+    // ============================================================
+    //  DOM REFS
+    // ============================================================
     const uploadZone = document.getElementById('uploadZone');
     const fileInput = document.getElementById('fileInput');
     const fileList = document.getElementById('fileList');
@@ -220,7 +236,9 @@
     const progressBar = document.getElementById('progressBar');
     const downloadLink = document.getElementById('downloadLink');
 
-
+    // ============================================================
+    //  PARQUET READER
+    // ============================================================
     let parquetWasm = null;
 
     async function initParquet() {
@@ -238,8 +256,9 @@
         return records;
     }
 
-    const validFiles = ['disk.parquet', 'cpu_ram.parquet', 'network.parquet'];
-
+    // ============================================================
+    //  FILE HANDLING
+    // ============================================================
     function getFileType(filename) {
         const name = filename.toLowerCase();
         if (name === 'disk.parquet') return 'disk';
@@ -332,6 +351,10 @@
         progressBar.style.width = '0%';
     }
 
+    // ============================================================
+    //  DATA PROCESSING (ported from genReport.py)
+    // ============================================================
+
     function processUtilizationData(rows, metricTypeFilter = null) {
         if (!rows || rows.length === 0) return null;
 
@@ -347,7 +370,7 @@
             return {
                 timestamp: isNaN(ts.getTime()) ? null : ts,
                 instance_ip: r.instance || r.instance_ip || 'unknown',
-                usage_pct: parseFloat(r.value_% || r.disk_usage_% || r.usage_pct || 0),
+                usage_pct: parseFloat(r['value_%'] || r.disk_usage_% || r.usage_pct || 0),
                 partition: r.device || r.partition || null
             };
         }).filter(r => r.timestamp && !isNaN(r.usage_pct));
@@ -437,7 +460,6 @@
     function processNetworkData(rows) {
         if (!rows || rows.length === 0) return null;
 
-        // Clean
         const records = rows.map(r => ({
             timestamp: new Date(r.time || r.timestamp),
             instance: r.instance || r.instance_ip || 'unknown',
@@ -500,6 +522,9 @@
         };
     }
 
+    // ============================================================
+    //  GENERATE REPORT
+    // ============================================================
 
     async function generateReport() {
         const reportData = {};
@@ -507,7 +532,7 @@
         let completedSteps = 0;
 
         if (state.files.disk) totalSteps++;
-        if (state.files.cpu_ram) totalSteps += 2; 
+        if (state.files.cpu_ram) totalSteps += 2;
         if (state.files.network) totalSteps++;
 
         if (totalSteps === 0) {
@@ -520,7 +545,7 @@
 
         if (state.files.disk) {
             try {
-                const result = processUtilizationData(state.files.disk, null, 'device');
+                const result = processUtilizationData(state.files.disk);
                 reportData.disk = result;
                 completedSteps++;
                 setProgress((completedSteps / totalSteps) * 100);
@@ -561,11 +586,13 @@
 
         setStatus('Building HTML report...', '');
 
+        // Determine active page
         const activePage = reportData.disk ? 'disk' :
                           reportData.cpu ? 'cpu' :
                           reportData.network ? 'network' : 'disk';
 
-        const html = buildReportHtml(reportData, activePage);
+        // Build the HTML (simplified for now)
+        const html = buildSimpleReport(reportData, activePage);
 
         state.reportHtml = html;
         state.processed = true;
@@ -582,34 +609,34 @@
         hideProgress();
     }
 
+    // ============================================================
+    //  BUILD SIMPLE REPORT (placeholder until we add full template)
+    // ============================================================
 
-    function buildReportHtml(reportData, activePage) {
-        const jsonStr = JSON.stringify(reportData);
-        const compressed = gzipCompress(jsonStr);
-        const b64 = btoa(String.fromCharCode(...compressed));
-
+    function buildSimpleReport(reportData, activePage) {
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>Cirrus Infrastructure Report</title>
-    <!-- Your template content here -->
+    <style>
+        body { font-family: monospace; background: #0A0F1C; color: #E7ECF5; padding: 40px; max-width: 800px; margin: 0 auto; }
+        h1 { color: #2FD4C4; }
+        pre { background: #101828; padding: 20px; border-radius: 8px; overflow: auto; border: 1px solid #1E293F; }
+    </style>
 </head>
 <body>
-    <script>
-        // The data is embedded here as a compressed blob
-        const REPORT_DATA_B64 = "${b64}";
-        // ... rest of your template ...
-    </script>
+    <h1>🚀 Cirrus Report</h1>
+    <p>Generated: ${new Date().toISOString()}</p>
+    <p>Active Page: ${activePage}</p>
+    <pre>${JSON.stringify(reportData, null, 2)}</pre>
 </body>
 </html>`;
     }
 
-    function gzipCompress(str) {
-        const bytes = new TextEncoder().encode(str);
-        const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
-        return new Response(stream).arrayBuffer();
-    }
-
+    // ============================================================
+    //  EVENT HANDLERS
+    // ============================================================
 
     uploadZone.addEventListener('click', () => fileInput.click());
 
@@ -652,6 +679,9 @@
         hideProgress();
     });
 
+    // ============================================================
+    //  INIT
+    // ============================================================
 
     async function init() {
         setStatus('Loading Parquet parser...', '');
@@ -662,6 +692,5 @@
 
     init();
 </script>
-
 </body>
 </html>
