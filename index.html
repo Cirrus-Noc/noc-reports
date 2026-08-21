@@ -179,7 +179,6 @@
     <h1>🚀 Cirrus</h1>
     <p class="subtitle">Generate infrastructure reports from Parquet files — entirely in your browser</p>
 
-    <!-- Upload Zone -->
     <div class="upload-zone" id="uploadZone">
         <span class="icon">📁</span>
         <p><strong>Drop your Parquet files here</strong> or click to browse</p>
@@ -188,18 +187,13 @@
 
     <input type="file" id="fileInput" multiple accept=".parquet">
 
-    <!-- File List -->
     <div class="file-list" id="fileList"></div>
-
-    <!-- Status -->
     <div class="status" id="status">Ready to generate report</div>
 
-    <!-- Progress -->
     <div class="progress" id="progress">
         <div class="bar" id="progressBar"></div>
     </div>
 
-    <!-- Buttons -->
     <button class="btn" id="generateBtn" disabled>📊 Generate Report</button>
     <button class="btn secondary" id="resetBtn" style="display:none;">🔄 Start Over</button>
 
@@ -207,10 +201,6 @@
         All processing happens locally · <a href="#" id="downloadLink" style="display:none;">Download report</a>
     </div>
 </div>
-
-<!-- ============================================================ -->
-<!--  Scripts -->
-<!-- ============================================================ -->
 
 <script src="https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/parquet_wasm.js"></script>
 <script>
@@ -523,7 +513,18 @@
     }
 
     // ============================================================
-    //  GENERATE REPORT
+    //  GZIP COMPRESSION
+    // ============================================================
+
+    async function gzipCompress(str) {
+        const bytes = new TextEncoder().encode(str);
+        const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+        const compressed = await new Response(stream).arrayBuffer();
+        return new Uint8Array(compressed);
+    }
+
+    // ============================================================
+    //  GENERATE REPORT WITH FULL TEMPLATE
     // ============================================================
 
     async function generateReport() {
@@ -549,7 +550,6 @@
                 reportData.disk = result;
                 completedSteps++;
                 setProgress((completedSteps / totalSteps) * 100);
-                setStatus(`✅ Processed disk data`, 'success');
             } catch (err) {
                 setStatus(`❌ Error processing disk: ${err.message}`, 'error');
                 return;
@@ -564,7 +564,6 @@
                 reportData.ram = ram;
                 completedSteps += 2;
                 setProgress((completedSteps / totalSteps) * 100);
-                setStatus(`✅ Processed CPU and RAM data`, 'success');
             } catch (err) {
                 setStatus(`❌ Error processing CPU/RAM: ${err.message}`, 'error');
                 return;
@@ -577,7 +576,6 @@
                 reportData.network = result;
                 completedSteps++;
                 setProgress((completedSteps / totalSteps) * 100);
-                setStatus(`✅ Processed network data`, 'success');
             } catch (err) {
                 setStatus(`❌ Error processing network: ${err.message}`, 'error');
                 return;
@@ -586,13 +584,17 @@
 
         setStatus('Building HTML report...', '');
 
-        // Determine active page
         const activePage = reportData.disk ? 'disk' :
                           reportData.cpu ? 'cpu' :
                           reportData.network ? 'network' : 'disk';
 
-        // Build the HTML (simplified for now)
-        const html = buildSimpleReport(reportData, activePage);
+        // Compress the data
+        const jsonStr = JSON.stringify(reportData);
+        const compressed = await gzipCompress(jsonStr);
+        const b64 = btoa(String.fromCharCode(...compressed));
+
+        // Generate the full HTML with your template
+        const html = buildFullReport(b64, activePage);
 
         state.reportHtml = html;
         state.processed = true;
@@ -602,6 +604,7 @@
         downloadLink.href = url;
         downloadLink.download = `cirrus-report-${new Date().toISOString().slice(0, 10)}.html`;
         downloadLink.style.display = 'inline';
+        downloadLink.textContent = '📥 Download Full Report';
 
         setStatus('✅ Report ready! Click the download link below.', 'success');
         resetBtn.style.display = 'block';
@@ -610,32 +613,3272 @@
     }
 
     // ============================================================
-    //  BUILD SIMPLE REPORT (placeholder until we add full template)
+    //  BUILD FULL REPORT (your template embedded)
     // ============================================================
 
-    function buildSimpleReport(reportData, activePage) {
+    function buildFullReport(b64Data, activePage) {
+        // This is your report_template.html with the data injected
         return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Cirrus Infrastructure Report</title>
-    <style>
-        body { font-family: monospace; background: #0A0F1C; color: #E7ECF5; padding: 40px; max-width: 800px; margin: 0 auto; }
-        h1 { color: #2FD4C4; }
-        pre { background: #101828; padding: 20px; border-radius: 8px; overflow: auto; border: 1px solid #1E293F; }
-    </style>
+  <meta charset="UTF-8">
+  <title>Infrastructure Monitor · Cirrus</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ----- Reset & Base ----- */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* ----- Theme Variables ----- */
+    :root {
+      --bg: #0A0F1C;
+      --panel: #101828;
+      --panel-2: #141E33;
+      --line: #1E293F;
+      --text: #E7ECF5;
+      --text-dim: #8B96AC;
+      --text-faint: #5B677E;
+      --brand: #2FD4C4;
+      --brand-dim: #1B7A72;
+      --brand-hover: #3DE8D6;
+      --blue: #4C8DFF;
+      --ok: #33D17A;
+      --warn: #F5B84E;
+      --crit: #F0684F;
+      --shadow: rgba(0, 0, 0, 0.4);
+      --toggle-bg: #1E293F;
+      --toggle-dot: #5B677E;
+      --font-display: 'Space Grotesk', sans-serif;
+      --font-body: 'Inter', sans-serif;
+      --font-mono: 'IBM Plex Mono', monospace;
+      --flatpickr-bg: #141E33;
+      --flatpickr-text: #E7ECF5;
+      --flatpickr-border: #1E293F;
+      --flatpickr-hover: #1E293F;
+      --flatpickr-selected: #2FD4C4;
+      --flatpickr-today: rgba(47, 212, 196, 0.2);
+    }
+
+    [data-theme="light"] {
+      --bg: #F0F4F9;
+      --panel: #FFFFFF;
+      --panel-2: #E8EEF5;
+      --line: #D0D9E6;
+      --text: #1A2332;
+      --text-dim: #4A5A72;
+      --text-faint: #8A9BB0;
+      --brand: #1EA89B;
+      --brand-dim: #D4F0EC;
+      --brand-hover: #168F84;
+      --blue: #4C8DFF;
+      --ok: #2AAF6A;
+      --warn: #E8A838;
+      --crit: #D9534A;
+      --shadow: rgba(0, 0, 0, 0.08);
+      --toggle-bg: #D0D9E6;
+      --toggle-dot: #FFFFFF;
+      --flatpickr-bg: #FFFFFF;
+      --flatpickr-text: #1A2332;
+      --flatpickr-border: #D0D9E6;
+      --flatpickr-hover: #E8EEF5;
+      --flatpickr-selected: #1EA89B;
+      --flatpickr-today: rgba(30, 168, 155, 0.15);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+
+    ::selection { background: var(--brand-dim); color: white; }
+
+    /* ----- Layout ----- */
+    .layout {
+      display: grid;
+      grid-template-columns: 248px 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+      transition: grid-template-columns 0.2s ease;
+    }
+
+    .layout.sidebar-collapsed {
+      grid-template-columns: 0px 1fr;
+    }
+
+    /* ----- Sidebar ----- */
+    aside {
+      grid-column: 1;
+      grid-row: 1 / 3;
+      background: linear-gradient(180deg, #0C1220 0%, #0A0F1C 100%);
+      border-right: 1px solid var(--line);
+      padding: 22px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 26px;
+      overflow: hidden;
+      position: relative;
+      min-width: 0;
+      transition: background 0.3s ease;
+    }
+
+    [data-theme="light"] aside {
+      background: linear-gradient(180deg, #E8EEF5 0%, #F0F4F9 100%);
+    }
+
+    .layout.sidebar-collapsed aside {
+      padding-left: 0;
+      padding-right: 0;
+      border-right: none;
+    }
+    .layout.sidebar-collapsed aside > * {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Brand */
+    .brand {
+      width: calc(100% + 28px);
+      height: 131px;
+      margin: -22px -14px 26px -14px;
+      border-radius: 0 0 35px 35px;
+      border: 12px solid #F4F4F4;
+      background: #F4F4F4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      flex-shrink: 0;
+      transition: background 0.3s ease, border-color 0.3s ease;
+    }
+
+    [data-theme="dark"] .brand {
+      background: #101828;
+      border-color: #1E293F;
+    }
+
+    [data-theme="light"] .brand {
+      background: #F4F4F4;
+      border-color: #F4F4F4;
+    }
+
+    .brand img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    /* Sidebar toggle */
+    .sidebar-toggle {
+      position: absolute;
+      top: 14px;
+      left: 210px;
+      z-index: 50;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: rgba(10, 15, 28, 0.85);
+      border: 1px solid var(--line);
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: left 0.2s ease, transform 0.2s ease, background 0.3s ease;
+    }
+
+    [data-theme="light"] .sidebar-toggle {
+      background: rgba(240, 244, 249, 0.85);
+    }
+
+    .sidebar-toggle:hover {
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .layout.sidebar-collapsed .sidebar-toggle {
+      left: 12px;
+      top: 14px;
+    }
+
+    .layout.sidebar-collapsed .sidebar-toggle svg {
+      transform: rotate(180deg);
+    }
+
+    /* Sidebar labels & controls */
+    .side-label {
+      font-size: 10.5px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    /* Instance dropdown */
+    .instance-dropdown {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 10px 12px;
+      cursor: pointer;
+      width: 100%;
+      min-width: 0;
+      transition: background 0.3s ease, border-color 0.3s ease;
+    }
+
+    .dropdown-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .dropdown-head .count {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dropdown-head svg {
+      color: var(--text-faint);
+      flex-shrink: 0;
+      transition: transform 0.15s ease;
+    }
+
+    .instance-dropdown.open .dropdown-head svg {
+      transform: rotate(180deg);
+    }
+
+    .instance-dropdown .dropdown-search,
+    .instance-dropdown .dropdown-list {
+      display: none;
+    }
+
+    .instance-dropdown.open .dropdown-search {
+      display: flex;
+    }
+    .instance-dropdown.open .dropdown-list {
+      display: flex;
+    }
+
+    .dropdown-search {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 7px 10px;
+      min-width: 0;
+      transition: background 0.3s ease, border-color 0.3s ease;
+    }
+
+    .dropdown-search svg {
+      color: var(--text-faint);
+      flex-shrink: 0;
+    }
+
+    .dropdown-search input {
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .dropdown-search input::placeholder {
+      color: var(--text-faint);
+    }
+
+    .dropdown-list {
+      margin-top: 8px;
+      max-height: 190px;
+      overflow-y: auto;
+      overflow-x: visible;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 4px;
+      border-radius: 6px;
+      cursor: pointer;
+      width: 100%;
+      min-width: 0;
+      flex-shrink: 0;
+    }
+
+    .dropdown-item:hover {
+      background: var(--panel);
+    }
+
+    .dropdown-item input[type="radio"] {
+      accent-color: var(--brand);
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .dropdown-item input[type="checkbox"] {
+      accent-color: var(--brand);
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .dropdown-item .ip {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .dropdown-item .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--ok);
+      flex-shrink: 0;
+    }
+    .dropdown-item .dot.warn {
+      background: var(--warn);
+    }
+    .dropdown-item .dot.crit {
+      background: var(--crit);
+    }
+
+    /* Select all row for partitions */
+    .select-all-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 4px;
+      margin-top: 6px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+      cursor: pointer;
+    }
+
+    .select-all-row input[type="checkbox"] {
+      accent-color: var(--brand);
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .select-all-row span {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    /* Status legend - view only */
+    .status-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 12.5px;
+      color: var(--text-dim);
+      border-radius: 6px;
+      padding: 4px 6px;
+      margin: -4px -6px;
+      border: 1px solid transparent;
+      background: none;
+      text-align: left;
+      width: 100%;
+      font-family: var(--font-body);
+      white-space: nowrap;
+      cursor: default;
+      opacity: 0.85;
+    }
+
+    .legend-row .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .legend-row .count {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-faint);
+      flex-shrink: 0;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .side-footer {
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      font-size: 11px;
+      color: var(--text-faint);
+      display: flex;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    /* ----- Page Navigation ----- */
+    .page-nav {
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      background: #0C1220;
+      border-bottom: 1px solid var(--line);
+      padding: 12px 18px;
+      flex-shrink: 0;
+      transition: background 0.3s ease;
+    }
+
+    [data-theme="light"] .page-nav {
+      background: #E8EEF5;
+    }
+
+    .layout.sidebar-collapsed .page-nav {
+      padding-left: 54px;
+    }
+
+    .page-nav-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .page-nav-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .page-tab {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-faint);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 7px 14px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .page-tab:hover {
+      color: var(--text);
+      background: var(--panel-2);
+    }
+
+    .page-tab.active {
+      color: #06110F;
+      background: var(--brand);
+      font-weight: 600;
+    }
+
+    .page-tab.empty::after {
+      content: ' ·';
+      opacity: 0.5;
+    }
+
+    /* Theme Toggle in nav */
+    .theme-toggle-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .theme-toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: var(--toggle-bg);
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.3s ease;
+      flex-shrink: 0;
+    }
+
+    .theme-toggle .toggle-dot {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      background: var(--toggle-dot);
+      border-radius: 50%;
+      transition: transform 0.3s ease, background 0.3s ease;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    [data-theme="light"] .theme-toggle .toggle-dot {
+      transform: translateX(20px);
+    }
+
+    .theme-toggle .toggle-icon {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 12px;
+      line-height: 1;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .theme-toggle .toggle-icon.sun {
+      left: 5px;
+      opacity: 1;
+    }
+
+    .theme-toggle .toggle-icon.moon {
+      right: 5px;
+      opacity: 0;
+    }
+
+    [data-theme="light"] .theme-toggle .toggle-icon.sun {
+      opacity: 0;
+    }
+
+    [data-theme="light"] .theme-toggle .toggle-icon.moon {
+      opacity: 1;
+    }
+
+    .theme-toggle-label {
+      font-size: 11px;
+      color: var(--text-faint);
+      font-family: var(--font-mono);
+      letter-spacing: 0.3px;
+      user-select: none;
+      min-width: 36px;
+    }
+
+    /* ----- Main Content ----- */
+    main {
+      grid-column: 2;
+      grid-row: 2;
+      padding: 26px 32px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      min-width: 0;
+      transition: padding-left 0.2s ease;
+    }
+
+    /* Top bar */
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .topbar-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .topbar h1 {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    .topbar .path {
+      font-size: 12px;
+      color: var(--text-faint);
+      font-family: var(--font-mono);
+    }
+
+    /* Date/Time Range Control */
+    .datetime-range {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 14px;
+      transition: background 0.3s ease, border-color 0.3s ease;
+      flex-wrap: wrap;
+    }
+
+    .datetime-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .datetime-group label {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      font-weight: 600;
+    }
+
+    .datetime-group .datetime-picker {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      outline: none;
+      width: 130px;
+      padding: 4px 0;
+      cursor: pointer;
+      transition: color 0.3s ease;
+    }
+
+    .datetime-group .datetime-picker::placeholder {
+      color: var(--text-faint);
+    }
+
+    .datetime-range .dash {
+      color: var(--text-faint);
+      flex-shrink: 0;
+      font-family: var(--font-mono);
+      font-size: 14px;
+    }
+
+    .reset-prefs-btn {
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text-faint);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .reset-prefs-btn:hover {
+      background: var(--panel-2);
+      color: var(--text);
+      border-color: var(--crit);
+    }
+
+    /* Flatpickr overrides */
+    .flatpickr-calendar {
+      background: var(--flatpickr-bg) !important;
+      border-color: var(--flatpickr-border) !important;
+      box-shadow: 0 4px 20px var(--shadow) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-months {
+      background: var(--flatpickr-bg) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-months .flatpickr-month {
+      color: var(--flatpickr-text) !important;
+      fill: var(--flatpickr-text) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-current-month {
+      color: var(--flatpickr-text) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-current-month .flatpickr-monthDropdown-months {
+      color: var(--flatpickr-text) !important;
+      background: var(--flatpickr-bg) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-current-month .flatpickr-monthDropdown-months option {
+      color: var(--flatpickr-text) !important;
+      background: var(--flatpickr-bg) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-current-month input.cur-year {
+      color: var(--flatpickr-text) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-weekdays,
+    .flatpickr-calendar .flatpickr-weekday {
+      color: var(--text-faint) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-day {
+      color: var(--flatpickr-text) !important;
+      border-color: transparent !important;
+    }
+
+    .flatpickr-calendar .flatpickr-day:hover {
+      background: var(--flatpickr-hover) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-day.selected,
+    .flatpickr-calendar .flatpickr-day.startRange,
+    .flatpickr-calendar .flatpickr-day.endRange {
+      background: var(--flatpickr-selected) !important;
+      border-color: var(--flatpickr-selected) !important;
+      color: #fff !important;
+    }
+
+    .flatpickr-calendar .flatpickr-day.today {
+      border-color: var(--flatpickr-selected) !important;
+      background: var(--flatpickr-today) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-day.today:hover {
+      background: var(--flatpickr-selected) !important;
+      color: #fff !important;
+    }
+
+    .flatpickr-calendar .flatpickr-day.inRange {
+      background: var(--flatpickr-today) !important;
+      border-color: var(--flatpickr-today) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-day.prevMonthDay,
+    .flatpickr-calendar .flatpickr-day.nextMonthDay {
+      color: var(--text-faint) !important;
+      opacity: 0.5;
+    }
+
+    .flatpickr-calendar .flatpickr-day.disabled,
+    .flatpickr-calendar .flatpickr-day.disabled:hover {
+      color: var(--text-faint) !important;
+      opacity: 0.3;
+    }
+
+    .flatpickr-calendar .flatpickr-months .flatpickr-prev-month svg,
+    .flatpickr-calendar .flatpickr-months .flatpickr-next-month svg {
+      fill: var(--flatpickr-text) !important;
+    }
+
+    .flatpickr-calendar .flatpickr-months .flatpickr-prev-month:hover svg,
+    .flatpickr-calendar .flatpickr-months .flatpickr-next-month:hover svg {
+      fill: var(--flatpickr-selected) !important;
+    }
+
+    /* KPI Row */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    .kpi {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+      min-width: 0;
+      transition: background 0.3s ease, border-color 0.3s ease;
+    }
+
+    .kpi.peak-clickable {
+      cursor: pointer;
+    }
+
+    .kpi.peak-clickable:hover {
+      border-color: var(--brand);
+      background: var(--panel-2);
+    }
+
+    .kpi.peak-clickable:active {
+      transform: translateY(1px);
+    }
+
+    .kpi.peak-clickable::after {
+      content: 'Click to drill down';
+      position: absolute;
+      right: 12px;
+      bottom: 9px;
+      font-family: var(--font-mono);
+      font-size: 8px;
+      color: var(--text-faint);
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    .kpi.peak-clickable:hover::after {
+      opacity: 1;
+    }
+
+    .kpi::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--brand), transparent);
+    }
+
+    .kpi .label {
+      font-size: 11px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      font-weight: 600;
+    }
+
+    .kpi .value {
+      font-family: var(--font-mono);
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .kpi .value small {
+      font-size: 14px;
+      color: var(--text-faint);
+      font-weight: 400;
+    }
+
+    .kpi .delta {
+      font-size: 11.5px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .delta.up { color: var(--crit); }
+    .delta.down { color: var(--ok); }
+    .delta.flat { color: var(--text-faint); }
+
+    /* Panels */
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px 22px 12px;
+      min-width: 0;
+      transition: background 0.3s ease, border-color 0.3s ease;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .panel-head h2 {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .panel-head .tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--brand);
+      background: rgba(47, 212, 196, 0.1);
+      border: 1px solid rgba(47, 212, 196, 0.3);
+      padding: 3px 9px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+
+    [data-theme="light"] .panel-head .tag {
+      background: rgba(30, 168, 155, 0.1);
+      border-color: rgba(30, 168, 155, 0.3);
+    }
+
+    .chart-wrap {
+      height: 250px;
+      min-width: 0;
+      position: relative;
+    }
+
+    .chart-loading-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--panel);
+      z-index: 5;
+      transition: opacity 0.25s ease;
+    }
+
+    .chart-loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .chart-spinner {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 3px solid var(--line);
+      border-top-color: var(--brand);
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Boot-time skeleton */
+    #bootSkeleton {
+      display: none;
+      flex-direction: column;
+      gap: 22px;
+    }
+    #bootSkeleton.visible {
+      display: flex;
+    }
+    .skel {
+      background: linear-gradient(90deg, var(--panel) 25%, var(--panel-2) 50%, var(--panel) 75%);
+      background-size: 200% 100%;
+      animation: skel-shimmer 1.4s ease-in-out infinite;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+    }
+    @keyframes skel-shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .skel-kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+    .skel-kpi {
+      height: 84px;
+    }
+    .skel-chart {
+      height: 250px;
+    }
+    .skel-lower-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 18px;
+    }
+    .skel-panel {
+      height: 260px;
+    }
+    @media (max-width: 1200px) {
+      .skel-kpi-row { grid-template-columns: repeat(2, 1fr); }
+      .skel-lower-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Chart Controls - Zoom */
+    .chart-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .chart-controls .controls-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .chart-controls .controls-label {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      min-width: 50px;
+    }
+
+    .chart-controls .controls-range {
+      flex: 1;
+      min-width: 80px;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--panel-2);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    .chart-controls .controls-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--brand);
+      cursor: pointer;
+      border: 2px solid var(--bg);
+      box-shadow: 0 0 8px rgba(47, 212, 196, 0.3);
+      transition: background 0.3s ease, border-color 0.3s ease;
+    }
+
+    .chart-controls .controls-range::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--brand);
+      cursor: pointer;
+      border: 2px solid var(--bg);
+    }
+
+    .chart-controls .controls-info {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-faint);
+      white-space: nowrap;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    /* Lower grid */
+    .lower-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 18px;
+      align-items: start;
+      min-width: 0;
+    }
+
+    .bar-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .bar-track {
+      flex: 1;
+      height: 6px;
+      border-radius: 4px;
+      background: var(--panel-2);
+      overflow: hidden;
+      min-width: 40px;
+      transition: background 0.3s ease;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, var(--brand), var(--blue));
+    }
+    .bar-fill.warn {
+      background: linear-gradient(90deg, var(--warn), #E08A2E);
+    }
+    .bar-fill.crit {
+      background: linear-gradient(90deg, var(--crit), #B33A2E);
+    }
+    .pct {
+      font-family: var(--font-mono);
+      color: var(--text);
+      width: 80px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* Network dual-metric row */
+    .network-metric-row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .network-metric {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .network-metric-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-faint);
+      white-space: nowrap;
+    }
+
+    .network-metric-value {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .network-metric-value.download {
+      color: var(--brand);
+    }
+
+    .network-metric-value.upload {
+      color: var(--blue);
+    }
+
+    /* Week group styles */
+    .week-group {
+      border-bottom: 1px solid rgba(30, 41, 63, 0.3);
+    }
+    [data-theme="light"] .week-group {
+      border-bottom: 1px solid rgba(208, 217, 230, 0.3);
+    }
+
+    .week-group:last-child {
+      border-bottom: none;
+    }
+
+    .week-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 4px;
+      cursor: pointer;
+      user-select: none;
+      border-radius: 6px;
+      transition: background 0.15s ease;
+    }
+
+    .week-header:hover {
+      background: rgba(20, 30, 51, 0.4);
+    }
+    [data-theme="light"] .week-header:hover {
+      background: rgba(208, 217, 230, 0.4);
+    }
+
+    .week-header .week-chevron {
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-faint);
+      font-size: 10px;
+      transition: transform 0.15s ease;
+      flex-shrink: 0;
+    }
+
+    .week-header.expanded .week-chevron {
+      transform: rotate(90deg);
+      color: var(--brand);
+    }
+
+    .week-header .week-label {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+
+    .week-header .week-range {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
+    .week-header .week-summary {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-faint);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .week-header .week-summary .avg {
+      color: var(--text-dim);
+    }
+
+    .week-header .week-summary .avg-download {
+      color: var(--brand);
+    }
+
+    .week-header .week-summary .avg-upload {
+      color: var(--blue);
+    }
+
+    .week-header .week-summary .warn-count {
+      color: var(--warn);
+    }
+
+    .week-days {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height 0.25s ease, opacity 0.2s ease;
+      padding-left: 24px;
+    }
+
+    .week-days.open {
+      max-height: 2000px;
+      opacity: 1;
+    }
+
+    .week-days table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    .week-days table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid rgba(30, 41, 63, 0.15);
+      color: var(--text-dim);
+    }
+
+    [data-theme="light"] .week-days table td {
+      border-bottom: 1px solid rgba(208, 217, 230, 0.15);
+    }
+
+    .week-days table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .week-days table td.day {
+      font-family: var(--font-mono);
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .filter-card .sub {
+      font-size: 10.5px;
+      color: var(--text-faint);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .segmented-select {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 9px 10px;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      min-width: 0;
+      transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+    }
+    .segmented-select:disabled {
+      opacity: 0.4;
+    }
+
+    /* Collapsible filter section */
+    .filter-collapsible-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      gap: 12px;
+    }
+
+    .filter-collapsible-head .filter-label {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .filter-collapsible-head .filter-chevron {
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-faint);
+      font-size: 10px;
+      transition: transform 0.15s ease;
+      flex-shrink: 0;
+    }
+
+    .filter-collapsible-head.collapsed .filter-chevron {
+      transform: rotate(0deg);
+    }
+
+    .filter-collapsible-head:not(.collapsed) .filter-chevron {
+      transform: rotate(90deg);
+      color: var(--brand);
+    }
+
+    .filter-collapsible-body {
+      overflow: hidden;
+      max-height: 1000px;
+      opacity: 1;
+      transition: max-height 0.25s ease, opacity 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      margin-top: 0;
+    }
+
+    .filter-collapsible-body.collapsed {
+      max-height: 0;
+      opacity: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+
+    /* Empty state */
+    .empty-state {
+      background: var(--panel);
+      border: 1px dashed var(--line);
+      border-radius: 14px;
+      padding: 60px 30px;
+      text-align: center;
+      color: var(--text-faint);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.7;
+      transition: background 0.3s ease, border-color 0.3s ease;
+    }
+    .empty-state strong {
+      color: var(--text-dim);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--line);
+      border-radius: 4px;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 1200px) {
+      .kpi-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .lower-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .layout {
+        grid-template-columns: 220px 1fr;
+      }
+      .kpi-row {
+        grid-template-columns: 1fr;
+      }
+      main {
+        padding: 16px;
+      }
+      .topbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .topbar-right {
+        justify-content: flex-start;
+      }
+      .datetime-range {
+        flex-wrap: wrap;
+        width: 100%;
+      }
+      .datetime-group {
+        flex: 1;
+        min-width: 100px;
+      }
+      .datetime-group .datetime-picker {
+        width: 100%;
+      }
+      .sidebar-toggle {
+        left: 182px !important;
+      }
+      .layout.sidebar-collapsed .sidebar-toggle {
+        left: 12px !important;
+      }
+      .chart-controls .controls-row {
+        flex-wrap: wrap;
+      }
+      .chart-controls .controls-range {
+        min-width: 60px;
+      }
+      .page-nav {
+        flex-wrap: wrap;
+      }
+      .page-nav-right {
+        margin-left: auto;
+      }
+      .week-header {
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .week-header .week-summary {
+        margin-left: 28px;
+        width: 100%;
+      }
+      .week-days {
+        padding-left: 8px;
+      }
+      .reset-prefs-btn {
+        margin-left: auto;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .datetime-group label {
+        display: none;
+      }
+      .datetime-group .datetime-picker {
+        font-size: 11px;
+        width: 100%;
+        min-width: 70px;
+      }
+      .datetime-range {
+        padding: 6px 10px;
+        gap: 6px;
+      }
+      .datetime-range .dash {
+        font-size: 12px;
+      }
+    }
+  </style>
 </head>
+
 <body>
-    <h1>🚀 Cirrus Report</h1>
-    <p>Generated: ${new Date().toISOString()}</p>
-    <p>Active Page: ${activePage}</p>
-    <pre>${JSON.stringify(reportData, null, 2)}</pre>
+
+<div class="layout" id="layout">
+  <!-- Sidebar toggle -->
+  <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
+    </svg>
+  </button>
+
+  <!-- Sidebar -->
+  <aside>
+    <div class="brand">
+      <div style="font-family:'Space Grotesk',sans-serif;font-size:28px;font-weight:700;color:var(--brand);">Cirrus</div>
+    </div>
+
+    <!-- Instances -->
+    <div>
+      <div class="side-label">Instances</div>
+      <div class="instance-dropdown open" id="instanceDropdown">
+        <div class="dropdown-head" onclick="document.getElementById('instanceDropdown').classList.toggle('open')">
+          <span class="count" id="selectedCount">-- selected</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </div>
+        <div class="dropdown-search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7"/>
+            <path d="M21 21l-4.3-4.3"/>
+          </svg>
+          <input type="text" id="instanceSearch" placeholder="Search IP or hostname...">
+        </div>
+        <div class="dropdown-list" id="instanceList"></div>
+      </div>
+    </div>
+
+    <!-- Partitions -->
+    <div id="partitionSection" style="display:none;">
+      <div class="side-label">Partitions</div>
+      <div class="instance-dropdown open" id="partitionDropdown">
+        <div class="dropdown-head" onclick="document.getElementById('partitionDropdown').classList.toggle('open')">
+          <span class="count" id="selectedPartitionCount">-- selected</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </div>
+        <div class="dropdown-search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7"/>
+            <path d="M21 21l-4.3-4.3"/>
+          </svg>
+          <input type="text" id="partitionSearch" placeholder="Search mount point...">
+        </div>
+        <label class="select-all-row">
+          <input type="checkbox" id="selectAllPartitions" checked>
+          <span>Select all</span>
+        </label>
+        <div class="dropdown-list" id="partitionList"></div>
+      </div>
+    </div>
+
+    <!-- Status thresholds -->
+    <div id="statusThresholdSection">
+      <div class="side-label">Status thresholds</div>
+      <div class="status-legend">
+        <div class="legend-row">
+          <span class="swatch" style="background:var(--ok)"></span>
+          85–90%
+          <span class="count" id="okCount">--</span>
+        </div>
+        <div class="legend-row">
+          <span class="swatch" style="background:var(--warn)"></span>
+          90–95%
+          <span class="count" id="warnCount">--</span>
+        </div>
+        <div class="legend-row">
+          <span class="swatch" style="background:var(--crit)"></span>
+          Above 95%
+          <span class="count" id="critCount">--</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="side-footer">
+      <span>v2.5 · Ops</span>
+      <span id="reportDate">Generated from browser</span>
+    </div>
+  </aside>
+
+  <!-- Page Nav -->
+  <nav class="page-nav">
+    <div class="page-nav-left">
+      <button class="page-tab" data-page="disk">Disk</button>
+      <button class="page-tab" data-page="cpu">CPU</button>
+      <button class="page-tab" data-page="ram">RAM</button>
+      <button class="page-tab" data-page="network">Network</button>
+    </div>
+    <div class="page-nav-right">
+      <div class="theme-toggle-wrapper">
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+          <span class="toggle-dot"></span>
+          <span class="toggle-icon sun">☀</span>
+          <span class="toggle-icon moon">☾</span>
+        </button>
+        <span class="theme-toggle-label" id="themeLabel">Dark</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main>
+    <div class="topbar">
+      <div class="topbar-left">
+        <h1 id="pageTitle">-- Utilization</h1>
+        <div class="path" id="pageBreadcrumb">Infrastructure / -- / Report</div>
+      </div>
+      <div class="topbar-right">
+        <div class="datetime-range">
+          <div class="datetime-group">
+            <label>From</label>
+            <input type="text" id="fromDateTime" class="datetime-picker" placeholder="DD/MM/YYYY">
+          </div>
+          <span class="dash">→</span>
+          <div class="datetime-group">
+            <label>To</label>
+            <input type="text" id="toDateTime" class="datetime-picker" placeholder="DD/MM/YYYY">
+          </div>
+          <button class="reset-prefs-btn" id="resetPrefsBtn" title="Reset to default preferences">↺ Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="bootSkeleton">
+      <div class="skel-kpi-row">
+        <div class="skel skel-kpi"></div>
+        <div class="skel skel-kpi"></div>
+        <div class="skel skel-kpi"></div>
+        <div class="skel skel-kpi"></div>
+      </div>
+      <div class="skel skel-chart"></div>
+      <div class="skel-lower-grid">
+        <div class="skel skel-panel"></div>
+        <div class="skel skel-panel"></div>
+      </div>
+    </div>
+
+    <div id="dashboardContent" style="display:none;">
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi">
+          <span class="label">Current Average</span>
+          <span class="value" id="kpiAvg">--<small>%</small></span>
+          <span class="delta flat" id="kpiAvgSub">--</span>
+        </div>
+        <div class="kpi">
+          <span class="label">Peak Usage</span>
+          <span class="value" id="kpiPeak">--<small>%</small></span>
+          <span class="delta flat" id="kpiPeakSub">--</span>
+        </div>
+        <div class="kpi">
+          <span class="label">Lowest Usage</span>
+          <span class="value" id="kpiLowest">--<small>%</small></span>
+          <span class="delta flat" id="kpiLowestSub">--</span>
+        </div>
+        <div class="kpi">
+          <span class="label">Time in Warning</span>
+          <span class="value" id="kpiWarn">--<small>%</small></span>
+          <span class="delta flat" id="kpiWarnSub">--</span>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="panel" style="margin-top:22px;">
+        <div class="panel-head">
+          <h2 id="chartTitle">Usage by Time</h2>
+          <span class="tag" id="chartTag">--</span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="ramChart"></canvas>
+          <div class="chart-loading-overlay hidden" id="chartLoadingOverlay">
+            <div class="chart-spinner"></div>
+          </div>
+        </div>
+        <div class="chart-controls">
+          <div class="controls-row">
+            <span class="controls-label">🔍 Zoom</span>
+            <input type="range" class="controls-range" id="zoomSlider" min="10" max="100" value="10">
+            <span class="controls-info" id="zoomInfo">10%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lower grid -->
+      <div class="lower-grid" style="margin-top:22px;">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Daily Average</h2>
+            <span class="tag" id="dayCountTag">--</span>
+          </div>
+          <div id="weekGroupContainer"></div>
+        </div>
+
+        <div class="panel filter-card">
+          <div class="filter-collapsible-head" id="filterSectionHead" role="button" tabindex="0" aria-expanded="true"
+               onclick="toggleFilterSection()"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleFilterSection();}">
+            <div class="filter-label">
+              🔍 Drill-down Filters
+            </div>
+            <span class="filter-chevron">▶</span>
+          </div>
+
+          <div class="filter-collapsible-body" id="filterSectionBody">
+            <div>
+              <div class="sub">Hour drill-down</div>
+              <select id="hourSelect" class="segmented-select">
+                <option value="all">All hours (full timeline)</option>
+              </select>
+            </div>
+            <div>
+              <div class="sub">Minute (optional, narrows hour further)</div>
+              <select id="minuteSelect" class="segmented-select" disabled>
+                <option value="all">All minutes in hour</option>
+              </select>
+            </div>
+            <div>
+              <div class="sub">Drill-down mode shows</div>
+              <div style="font-size:11.5px; color:var(--text-dim); line-height:1.5;" id="drillExplainer">
+                Full continuous timeline across the selected date range.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="emptyState" class="empty-state" style="display:none;">
+      No data available for <strong id="emptyPageName">this page</strong>.<br>
+      Upload the corresponding Parquet files using the generator tool.
+    </div>
+  </main>
+</div>
+
+<script>
+  // ============================================================
+  //  DECOMPRESS AND LOAD DATA
+  // ============================================================
+
+  const REPORT_DATA_B64 = '${b64Data}';
+  const ACTIVE_PAGE = '${activePage}';
+
+  async function decompressReportData(b64) {
+    const compressedBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const stream = new Blob([compressedBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    const text = await new Response(stream).text();
+    return JSON.parse(text);
+  }
+
+  // ============================================================
+  //  THEME TOGGLE
+  // ============================================================
+
+  function getStoredTheme() {
+    try { return localStorage.getItem('cirrus-theme'); } catch (e) { return null; }
+  }
+  function setStoredTheme(theme) {
+    try { localStorage.setItem('cirrus-theme', theme); } catch (e) { /* ignore */ }
+  }
+
+  (function initTheme() {
+    const stored = getStoredTheme();
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = stored || (prefersDark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+    updateThemeUI(theme);
+  })();
+
+  function updateThemeUI(theme) {
+    const toggle = document.getElementById('themeToggle');
+    const label = document.getElementById('themeLabel');
+    if (theme === 'light') {
+      toggle.setAttribute('aria-label', 'Switch to dark mode');
+      label.textContent = 'Light';
+    } else {
+      toggle.setAttribute('aria-label', 'Switch to light mode');
+      label.textContent = 'Dark';
+    }
+  }
+
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    setStoredTheme(theme);
+    updateThemeUI(theme);
+    applyChartTheme(theme);
+    updateFlatpickrTheme();
+  }
+
+  function updateFlatpickrTheme() {
+    if (window.fromPicker && window.toPicker) {
+      window.fromPicker.redraw();
+      window.toPicker.redraw();
+    }
+  }
+
+  document.getElementById('themeToggle').addEventListener('click', function() {
+    const current = document.documentElement.getAttribute('data-theme');
+    setTheme(current === 'dark' ? 'light' : 'dark');
+  });
+
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+    if (!getStoredTheme()) {
+      document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+      updateThemeUI(e.matches ? 'dark' : 'light');
+      applyChartTheme(e.matches ? 'dark' : 'light');
+      updateFlatpickrTheme();
+    }
+  });
+
+  // ============================================================
+  //  GLOBALS
+  // ============================================================
+
+  let PARSED_TS = [];
+  let SERIES = {};
+  let INSTANCES = [];
+  let instanceAverages = {};
+  let DATE_MIN = '';
+  let DATE_MAX = '';
+  let NODES_TOTAL = 0;
+  let HAS_PARTITIONS = false;
+  let PARTITIONS_BY_INSTANCE = {};
+  let NETWORK_DIRECTIONS = [];
+  let drillMode = false;
+  let peakDrilldownActive = false;
+  let dayBuckets = {};
+  let baseDateRange = { from: '', to: '' };
+  let currentPage = ACTIVE_PAGE;
+  let REPORT_DATA = null;
+  let updateScheduled = false;
+
+  // ============================================================
+  //  PREFERENCES
+  // ============================================================
+
+  const Preferences = {
+    _key: 'cirrus-preferences',
+    save(prefs) {
+      try { localStorage.setItem(this._key, JSON.stringify(prefs)); } catch (e) {}
+    },
+    load() {
+      try { const raw = localStorage.getItem(this._key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+    },
+    clear() {
+      try { localStorage.removeItem(this._key); } catch (e) {}
+    }
+  };
+
+  // ============================================================
+  //  HELPERS
+  // ============================================================
+
+  function isFiniteNumber(v) {
+    return v !== null && v !== undefined && isFinite(v);
+  }
+
+  function average(values) {
+    return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  }
+
+  function debounce(func, wait = 300) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => { clearTimeout(timeout); func(...args); };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  function formatTimeLabel(ts, hour24) {
+    return ts.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      ...(hour24 ? { hour12: false } : {})
+    });
+  }
+
+  function formatBitsPerSecond(value) {
+    if (value === null || value === undefined || !isFinite(value)) return '--';
+    const abs = Math.abs(value);
+    if (abs >= 1e9) return (value / 1e9).toFixed(2) + ' Gbps';
+    if (abs >= 1e6) return (value / 1e6).toFixed(2) + ' Mbps';
+    if (abs >= 1e3) return (value / 1e3).toFixed(2) + ' Kbps';
+    return value.toFixed(0) + ' bps';
+  }
+
+  function isNetworkPage() {
+    return currentPage === 'network';
+  }
+
+  function hexToRgba(hex, alpha) {
+    const clean = hex.replace('#', '');
+    const r = parseInt(clean.substring(0, 2), 16);
+    const g = parseInt(clean.substring(2, 4), 16);
+    const b = parseInt(clean.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  function formatDateForPicker(date) {
+    if (!date || isNaN(date.getTime())) return '';
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  function parseDateTime(str) {
+    if (!str) return null;
+    if (window.fromPicker) {
+      const parsed = window.fromPicker.parseDate(str, 'd/m/Y');
+      if (parsed && !isNaN(parsed.getTime())) return parsed;
+    }
+    const parts = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (parts) {
+      const d = new Date(parseInt(parts[3]), parseInt(parts[2]) - 1, parseInt(parts[1]), 0, 0, 0);
+      if (!isNaN(d.getTime())) return d;
+    }
+    const direct = new Date(str);
+    if (!isNaN(direct.getTime())) return direct;
+    return null;
+  }
+
+  function setPickerDate(picker, value) {
+    if (!picker || !value) return;
+    const parsed = picker.parseDate(value, 'd/m/Y');
+    if (parsed) picker.setDate(parsed, false);
+  }
+
+  // ============================================================
+  //  CHART SETUP
+  // ============================================================
+
+  const ctx = document.getElementById('ramChart').getContext('2d');
+  Chart.register(ChartZoom);
+
+  const WARN_THRESHOLD = 90;
+  const CRIT_THRESHOLD = 95;
+
+  const CHART_THEME_COLORS = {
+    dark: {
+      grid: '#141E33',
+      tick: '#5B677E',
+      line: '#2FD4C4',
+      warnLine: '#F5B84E',
+      critLine: '#F0684F',
+      gradientTop: 'rgba(47,212,196,0.35)',
+      gradientBottom: 'rgba(47,212,196,0.0)',
+      tooltipBg: '#141E33',
+      tooltipBorder: '#1E293F',
+      tooltipTitle: '#8B96AC',
+      tooltipBody: '#E7ECF5',
+    },
+    light: {
+      grid: '#D0D9E6',
+      tick: '#4A5A72',
+      line: '#1EA89B',
+      warnLine: '#E8A838',
+      critLine: '#D9534A',
+      gradientTop: 'rgba(30,168,155,0.25)',
+      gradientBottom: 'rgba(30,168,155,0.0)',
+      tooltipBg: '#FFFFFF',
+      tooltipBorder: '#D0D9E6',
+      tooltipTitle: '#4A5A72',
+      tooltipBody: '#1A2332',
+    },
+  };
+
+  const NETWORK_LINE_COLORS = {
+    dark: { download: '#2FD4C4', upload: '#4C8DFF', other: '#F5B84E' },
+    light: { download: '#1EA89B', upload: '#4C8DFF', other: '#E8A838' }
+  };
+
+  function networkDirectionColor(direction, theme) {
+    const c = NETWORK_LINE_COLORS[theme] || NETWORK_LINE_COLORS.dark;
+    const d = String(direction || '').toLowerCase();
+    if (d.includes('download')) return c.download;
+    if (d.includes('upload')) return c.upload;
+    return c.other;
+  }
+
+  function utilizationSegmentBand(p0, p1) {
+    const maxVal = Math.max(
+      isFiniteNumber(p0) ? p0 : -Infinity,
+      isFiniteNumber(p1) ? p1 : -Infinity
+    );
+    if (maxVal >= CRIT_THRESHOLD) return 'crit';
+    if (maxVal >= WARN_THRESHOLD) return 'warn';
+    return 'normal';
+  }
+
+  function utilizationSegmentColor(themeColors) {
+    return function(segmentCtx) {
+      const band = utilizationSegmentBand(segmentCtx.p0.parsed.y, segmentCtx.p1.parsed.y);
+      if (band === 'crit') return themeColors.critLine;
+      if (band === 'warn') return themeColors.warnLine;
+      return themeColors.line;
+    };
+  }
+
+  function utilizationSegmentFillColor(themeColors) {
+    return function(segmentCtx) {
+      const band = utilizationSegmentBand(segmentCtx.p0.parsed.y, segmentCtx.p1.parsed.y);
+      if (band === 'crit') return hexToRgba(themeColors.critLine, 0.28);
+      if (band === 'warn') return hexToRgba(themeColors.warnLine, 0.28);
+      return hexToRgba(themeColors.line, 0.22);
+    };
+  }
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Usage',
+        data: [],
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.35
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 200 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          borderWidth: 1,
+          bodyFont: { family: 'IBM Plex Mono' },
+          callbacks: {
+            label: (c) => {
+              if (c.parsed.y === null || c.parsed.y === undefined) {
+                return ' ' + c.dataset.label + ': --';
+              }
+              return ' ' + c.dataset.label + ': ' + (isNetworkPage() ? formatBitsPerSecond(c.parsed.y) : c.parsed.y.toFixed(1) + '%');
+            }
+          }
+        },
+        zoom: {
+          pan: { enabled: true, mode: 'x', modifierKey: 'shift' },
+          zoom: {
+            wheel: { enabled: true, speed: 0.05, modifierKey: 'ctrl' },
+            pinch: { enabled: true },
+            mode: 'x',
+          },
+          limits: { x: { minRange: 5 } }
+        }
+      },
+      scales: {
+        x: {
+          grid: {},
+          ticks: {
+            font: { family: 'IBM Plex Mono', size: 10 },
+            maxTicksLimit: 15,
+            minRotation: 45,
+            maxRotation: 45,
+            autoSkipPadding: 12,
+            callback: function(value, index, ticksArray) {
+              const label = this.getLabelForValue(value);
+              if (drillMode && label) {
+                const match = label.match(/^(.*?)[, ]+(\d{2}):(\d{2})$/);
+                if (match) {
+                  const hour = parseInt(match[2], 10);
+                  const minute = parseInt(match[3], 10);
+                  if (document.getElementById('minuteSelect').value !== 'all') {
+                    return match[1] + ' ' + String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+                  }
+                  if (minute === 0) {
+                    const endHour = String((hour + 1) % 24).padStart(2, '0');
+                    return match[1] + ' ' + String(hour).padStart(2, '0') + ':00–' + endHour + ':00';
+                  }
+                  return '';
+                }
+                return label;
+              }
+              return label;
+            }
+          }
+        },
+        y: {
+          grid: {},
+          ticks: {
+            font: { family: 'IBM Plex Mono', size: 10 },
+            callback: (v) => isNetworkPage() ? formatBitsPerSecond(v) : v.toFixed(1) + '%'
+          },
+          beginAtZero: true
+        }
+      }
+    }
+  });
+
+  let lastChartData = '';
+
+  function applyChartTheme(theme) {
+    const c = CHART_THEME_COLORS[theme] || CHART_THEME_COLORS.dark;
+
+    chart.options.scales.x.grid.color = c.grid;
+    chart.options.scales.x.ticks.color = c.tick;
+    chart.options.scales.y.grid.color = c.grid;
+    chart.options.scales.y.ticks.color = c.tick;
+
+    chart.options.plugins.tooltip.backgroundColor = c.tooltipBg;
+    chart.options.plugins.tooltip.borderColor = c.tooltipBorder;
+    chart.options.plugins.tooltip.titleColor = c.tooltipTitle;
+    chart.options.plugins.tooltip.bodyColor = c.tooltipBody;
+
+    chart.data.datasets.forEach((dataset, idx) => {
+      if (isNetworkPage()) {
+        const color = networkDirectionColor(dataset.label, theme);
+        dataset.borderColor = color;
+        dataset.backgroundColor = color;
+        dataset.fill = false;
+        dataset.segment = undefined;
+      } else if (idx === 0) {
+        dataset.borderColor = c.line;
+        dataset.backgroundColor = hexToRgba(c.line, 0.22);
+        dataset.fill = true;
+        dataset.segment = {
+          borderColor: utilizationSegmentColor(c),
+          backgroundColor: utilizationSegmentFillColor(c)
+        };
+      }
+    });
+
+    chart.update('none');
+  }
+
+  applyChartTheme(document.documentElement.getAttribute('data-theme'));
+
+  // ============================================================
+  //  ZOOM FUNCTIONALITY
+  // ============================================================
+
+  const DEFAULT_ZOOM_LEVEL = 10;
+  let zoomLevel = DEFAULT_ZOOM_LEVEL;
+
+  const zoomSlider = document.getElementById('zoomSlider');
+  const zoomInfo = document.getElementById('zoomInfo');
+
+  function applyZoom() {
+    const dataLength = chart.data.labels.length;
+    if (dataLength === 0) return;
+
+    const visibleCount = Math.max(2, Math.floor(dataLength * (zoomLevel / 100)));
+    chart.options.scales.x.min = 0;
+    chart.options.scales.x.max = Math.min(dataLength, visibleCount) - 1;
+    chart.update('none');
+
+    zoomSlider.value = zoomLevel;
+    zoomInfo.textContent = Math.round(zoomLevel) + '%';
+  }
+
+  function resetZoom() {
+    zoomLevel = DEFAULT_ZOOM_LEVEL;
+    applyZoom();
+  }
+
+  zoomSlider.addEventListener('input', function() {
+    zoomLevel = parseFloat(this.value);
+    applyZoom();
+  });
+
+  // ============================================================
+  //  DATE BOUNDS HELPERS
+  // ============================================================
+
+  function getDateBounds() {
+    let minDate, maxDate;
+    if (DATE_MIN) {
+      const parts = DATE_MIN.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (parts) {
+        minDate = new Date(parseInt(parts[1]), parseInt(parts[2]) - 1, parseInt(parts[3]), 0, 0, 0);
+      }
+    }
+    if (DATE_MAX) {
+      const parts = DATE_MAX.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (parts) {
+        maxDate = new Date(parseInt(parts[1]), parseInt(parts[2]) - 1, parseInt(parts[3]), 23, 59, 59);
+      }
+    }
+    return { minDate, maxDate };
+  }
+
+  function getBaseDateBounds() {
+    let start = parseDateTime(baseDateRange.from);
+    let end = parseDateTime(baseDateRange.to);
+    if (!start) start = new Date(DATE_MIN + 'T00:00:00');
+    if (!end) end = new Date(DATE_MAX + 'T23:59:59.999');
+    else end.setHours(23, 59, 59, 999);
+    if (start > end) [start, end] = [end, start];
+    return { start, end };
+  }
+
+  function forEachIndexInBaseRange(callback) {
+    const { start, end } = getBaseDateBounds();
+    for (let i = 0; i < PARSED_TS.length; i++) {
+      const ts = PARSED_TS[i];
+      if (ts < start || ts > end) continue;
+      callback(i);
+    }
+  }
+
+  function findExtremumIndexInBaseRange(valueFn, isBetter) {
+    let bestValue = null;
+    let bestIndex = -1;
+    forEachIndexInBaseRange(i => {
+      const v = valueFn(i);
+      if (isFiniteNumber(v) && (bestIndex === -1 || isBetter(v, bestValue))) {
+        bestValue = v;
+        bestIndex = i;
+      }
+    });
+    return bestIndex;
+  }
+
+  // ============================================================
+  //  FLATPICKR
+  // ============================================================
+
+  function initDateTimePickers() {
+    const { minDate, maxDate } = getDateBounds();
+
+    const commonConfig = {
+      dateFormat: 'd/m/Y',
+      enableTime: false,
+      allowInput: true,
+      minDate: minDate,
+      maxDate: maxDate,
+    };
+
+    const fromPicker = flatpickr(document.getElementById('fromDateTime'), {
+      ...commonConfig,
+      onChange: function(selectedDates, dateStr, instance) {
+        if (window.toPicker && selectedDates.length > 0) {
+          window.toPicker.set('minDate', selectedDates[0]);
+        }
+        peakDrilldownActive = false;
+        baseDateRange.from = document.getElementById('fromDateTime').value;
+        baseDateRange.to = document.getElementById('toDateTime').value;
+        saveCurrentPreferences();
+        debouncedRecompute();
+      }
+    });
+
+    const toPicker = flatpickr(document.getElementById('toDateTime'), {
+      ...commonConfig,
+      onChange: function(selectedDates, dateStr, instance) {
+        if (window.fromPicker && selectedDates.length > 0) {
+          window.fromPicker.set('maxDate', selectedDates[0]);
+        }
+        peakDrilldownActive = false;
+        baseDateRange.from = document.getElementById('fromDateTime').value;
+        baseDateRange.to = document.getElementById('toDateTime').value;
+        saveCurrentPreferences();
+        debouncedRecompute();
+      }
+    });
+
+    window.fromPicker = fromPicker;
+    window.toPicker = toPicker;
+    return { fromPicker, toPicker };
+  }
+
+  function updatePickerConstraints() {
+    if (!window.fromPicker || !window.toPicker) return;
+    const { minDate, maxDate } = getDateBounds();
+    window.fromPicker.set('minDate', minDate);
+    window.fromPicker.set('maxDate', maxDate);
+    window.toPicker.set('minDate', minDate);
+    window.toPicker.set('maxDate', maxDate);
+  }
+
+  // ============================================================
+  //  DOM REFS
+  // ============================================================
+
+  const DOM = {
+    kpiAvg: document.getElementById('kpiAvg'),
+    kpiAvgSub: document.getElementById('kpiAvgSub'),
+    kpiPeak: document.getElementById('kpiPeak'),
+    kpiPeakSub: document.getElementById('kpiPeakSub'),
+    kpiLowest: document.getElementById('kpiLowest'),
+    kpiLowestSub: document.getElementById('kpiLowestSub'),
+    kpiWarn: document.getElementById('kpiWarn'),
+    kpiWarnSub: document.getElementById('kpiWarnSub'),
+    chartTag: document.getElementById('chartTag'),
+    selectedCount: document.getElementById('selectedCount'),
+    partitionSection: document.getElementById('partitionSection'),
+    partitionList: document.getElementById('partitionList'),
+    selectedPartitionCount: document.getElementById('selectedPartitionCount'),
+    dayCountTag: document.getElementById('dayCountTag'),
+    weekGroupContainer: document.getElementById('weekGroupContainer'),
+    drillExplainer: document.getElementById('drillExplainer'),
+    minuteSelect: document.getElementById('minuteSelect'),
+    hourSelect: document.getElementById('hourSelect'),
+    fromDateTime: document.getElementById('fromDateTime'),
+    toDateTime: document.getElementById('toDateTime'),
+    pageTitle: document.getElementById('pageTitle'),
+    pageBreadcrumb: document.getElementById('pageBreadcrumb'),
+    chartTitle: document.getElementById('chartTitle'),
+    emptyPageName: document.getElementById('emptyPageName'),
+  };
+
+  // ============================================================
+  //  SIDEBAR FUNCTIONS
+  // ============================================================
+
+  function selectedInstance() {
+    const selected = document.querySelector('.instance-radio:checked');
+    return selected ? selected.value : null;
+  }
+
+  function syncSelectedCount() {
+    const sel = selectedInstance();
+    DOM.selectedCount.textContent = sel ? '1 of ' + NODES_TOTAL + ' selected' : '0 of ' + NODES_TOTAL + ' selected';
+  }
+
+  function selectedPartitions() {
+    return Array.from(document.querySelectorAll('.partition-checkbox:checked')).map(el => el.value);
+  }
+
+  function syncSelectAllPartitionsState() {
+    const boxes = document.querySelectorAll('.partition-checkbox');
+    const checked = document.querySelectorAll('.partition-checkbox:checked').length;
+    const selectAllBox = document.getElementById('selectAllPartitions');
+    if (selectAllBox) {
+      selectAllBox.checked = boxes.length > 0 && checked === boxes.length;
+      selectAllBox.indeterminate = checked > 0 && checked < boxes.length;
+    }
+    DOM.selectedPartitionCount.textContent = checked + ' of ' + boxes.length + ' selected';
+  }
+
+  function rebuildPartitionList() {
+    if (!HAS_PARTITIONS) return;
+
+    const ip = selectedInstance();
+    const prevChecked = new Set(selectedPartitions());
+    const partitions = ip && PARTITIONS_BY_INSTANCE[ip] ? PARTITIONS_BY_INSTANCE[ip].slice().sort() : [];
+
+    DOM.partitionList.innerHTML = '';
+    if (partitions.length === 0) {
+      DOM.partitionList.insertAdjacentHTML('beforeend', `
+        <div style="padding:8px 4px; color:var(--text-faint); font-size:11.5px; font-family:var(--font-mono);">
+          No partitions available for this instance
+        </div>
+      `);
+      DOM.selectedPartitionCount.textContent = '0 of 0 selected';
+      return;
+    }
+
+    partitions.forEach(p => {
+      const checked = prevChecked.has(p);
+      DOM.partitionList.insertAdjacentHTML('beforeend', `
+        <label class="dropdown-item">
+          <input type="checkbox" class="partition-checkbox" value="${p}" ${checked ? 'checked' : ''}>
+          <span class="ip">${p}</span>
+        </label>
+      `);
+    });
+
+    document.querySelectorAll('.partition-checkbox').forEach(cb =>
+      cb.addEventListener('change', () => { syncSelectAllPartitionsState(); saveCurrentPreferences(); debouncedRecompute(); })
+    );
+
+    syncSelectAllPartitionsState();
+  }
+
+  function computeRowAverage(ip, parts, i) {
+    if (!ip || !SERIES[ip]) return null;
+    if (HAS_PARTITIONS) {
+      let sum = 0, n = 0;
+      for (const p of parts) {
+        const arr = SERIES[ip][p];
+        if (!arr) continue;
+        const v = arr[i];
+        if (v !== null && v !== undefined) { sum += v; n++; }
+      }
+      return n ? sum / n : null;
+    }
+    const v = SERIES[ip][i];
+    return (v !== null && v !== undefined) ? v : null;
+  }
+
+  function hourRangeLabel(h) {
+    const start = h.padStart(2, '0') + ':00';
+    const end = String((parseInt(h) + 1) % 24).padStart(2, '0') + ':00';
+    return [start, end];
+  }
+
+  function minuteRangeLabel(h, m) {
+    let startH = parseInt(h);
+    let startM = parseInt(m);
+    let endH = startH;
+    let endM = startM + 1;
+    if (endM === 60) { endM = 0; endH = (startH + 1) % 24; }
+    const start = String(startH).padStart(2, '0') + ':' + String(startM).padStart(2, '0');
+    const end = String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0');
+    return [start, end];
+  }
+
+  // ============================================================
+  //  RECOMPUTE
+  // ============================================================
+
+  const debouncedRecompute = debounce(() => {
+    scheduleUpdate(recompute);
+  }, 200);
+
+  function scheduleUpdate(callback) {
+    if (updateScheduled) return;
+    updateScheduled = true;
+    requestAnimationFrame(() => {
+      updateScheduled = false;
+      callback();
+    });
+  }
+
+  function recompute() {
+    const data = REPORT_DATA[currentPage];
+    if (!data) return;
+
+    const ip = selectedInstance();
+    const startDateStr = DOM.fromDateTime.value;
+    const endDateStr = DOM.toDateTime.value;
+    const hourVal = DOM.hourSelect.value;
+    const minuteVal = DOM.minuteSelect.value;
+    const minuteNum = (minuteVal !== 'all' && minuteVal !== '') ? parseInt(minuteVal.replace(':', ''), 10) : 'all';
+
+    DOM.minuteSelect.disabled = (hourVal === 'all');
+    drillMode = (hourVal !== 'all');
+
+    if (hourVal === 'all') {
+      DOM.drillExplainer.textContent = 'Full continuous timeline across the selected date range.';
+    } else if (minuteVal === 'all') {
+      const [rangeStart, rangeEnd] = hourRangeLabel(hourVal);
+      DOM.drillExplainer.textContent = `Minute-by-minute readings within ${rangeStart}–${rangeEnd}, for each day.`;
+    } else {
+      const [rangeStart, rangeEnd] = minuteRangeLabel(hourVal, minuteVal);
+      DOM.drillExplainer.textContent = `Readings within ${rangeStart}–${rangeEnd}, for each day.`;
+    }
+
+    const parts = HAS_PARTITIONS ? selectedPartitions() : null;
+
+    function rowAvg(i) {
+      return computeRowAverage(ip, parts, i);
+    }
+
+    let start = parseDateTime(startDateStr);
+    let end = parseDateTime(endDateStr);
+    if (end) end.setHours(23, 59, 59, 999);
+
+    if (!start) {
+      start = new Date(DATE_MIN + 'T00:00:00');
+      const formatted = formatDateForPicker(start);
+      DOM.fromDateTime.value = formatted;
+      if (window.fromPicker) {
+        const parsed = window.fromPicker.parseDate(formatted, 'd/m/Y');
+        if (parsed) window.fromPicker.setDate(parsed, false);
+      }
+    }
+    if (!end) {
+      end = new Date(DATE_MAX + 'T23:59:59');
+      const formatted = formatDateForPicker(end);
+      DOM.toDateTime.value = formatted;
+      if (window.toPicker) {
+        const parsed = window.toPicker.parseDate(formatted, 'd/m/Y');
+        if (parsed) window.toPicker.setDate(parsed, false);
+      }
+    }
+
+    if (start > end) {
+      const temp = start;
+      start = end;
+      end = temp;
+    }
+
+    let indices = [];
+    dayBuckets = {};
+
+    for (let i = 0; i < PARSED_TS.length; i++) {
+      const ts = PARSED_TS[i];
+      if (ts < start || ts > end) continue;
+      if (hourVal !== 'all' && ts.getHours() !== parseInt(hourVal, 10)) continue;
+      if (minuteNum !== 'all' && ts.getMinutes() !== minuteNum) continue;
+      indices.push(i);
+      const dstr = ts.getFullYear() + '-' +
+        String(ts.getMonth() + 1).padStart(2, '0') + '-' +
+        String(ts.getDate()).padStart(2, '0');
+      (dayBuckets[dstr] ||= []).push(i);
+    }
+
+    const thinned = indices;
+
+    if (currentPage === 'network') {
+      const selectedIp = ip || INSTANCES[0] || null;
+      const selectedSeries = selectedIp && SERIES[selectedIp] ? SERIES[selectedIp] : {};
+      const directions = NETWORK_DIRECTIONS.length ? NETWORK_DIRECTIONS : Object.keys(selectedSeries);
+      const downloadSeries = selectedSeries['Download'] || [];
+      const uploadSeries = selectedSeries['Upload'] || [];
+
+      const chartLabels = thinned.map(i => formatTimeLabel(PARSED_TS[i], true));
+
+      const datasets = directions.map(direction => ({
+        label: direction,
+        data: thinned.map(i => {
+          const v = (selectedSeries[direction] || [])[i];
+          return isFiniteNumber(v) ? v : null;
+        }),
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        fill: false,
+        tension: 0.25
+      }));
+
+      const allNetworkValues = datasets.flatMap(ds => ds.data.filter(isFiniteNumber));
+
+      const dataHash = JSON.stringify({
+        page: currentPage,
+        instance: selectedIp,
+        labels: chartLabels,
+        datasets: datasets
+      });
+
+      if (dataHash !== lastChartData) {
+        lastChartData = dataHash;
+
+        chart.data.labels = chartLabels;
+        chart.data.datasets = datasets;
+
+        chart.options.plugins.legend.display = datasets.length > 0;
+        chart.options.scales.x.ticks.autoSkip = !drillMode;
+        chart.options.scales.x.ticks.maxTicksLimit = drillMode ? 100 : 15;
+        chart.options.scales.y.ticks.callback = (v) => formatBitsPerSecond(v);
+        chart.options.plugins.tooltip.callbacks.label = (c) =>
+          ' ' + c.dataset.label + ': ' + formatBitsPerSecond(c.parsed.y);
+
+        if (allNetworkValues.length > 0) {
+          const dataMin = Math.min(...allNetworkValues);
+          const dataMax = Math.max(...allNetworkValues);
+          const range = dataMax - dataMin;
+          const padding = Math.max(range * 0.10, dataMax * 0.02, 1);
+          chart.options.scales.y.min = Math.max(0, Math.floor(dataMin - padding));
+          chart.options.scales.y.max = Math.ceil(dataMax + padding);
+        } else {
+          chart.options.scales.y.min = 0;
+          chart.options.scales.y.max = undefined;
+        }
+
+        applyChartTheme(document.documentElement.getAttribute('data-theme'));
+        chart.update('none');
+        applyZoom();
+      }
+
+      const avgDownload = average(indices.map(i => downloadSeries[i]).filter(isFiniteNumber));
+      const avgUpload = average(indices.map(i => uploadSeries[i]).filter(isFiniteNumber));
+
+      let peakDownload = 0;
+      let peakUpload = 0;
+      forEachIndexInBaseRange(i => {
+        const dv = downloadSeries[i];
+        const uv = uploadSeries[i];
+        if (isFiniteNumber(dv)) peakDownload = Math.max(peakDownload, dv);
+        if (isFiniteNumber(uv)) peakUpload = Math.max(peakUpload, uv);
+      });
+
+      DOM.kpiAvg.innerHTML = formatBitsPerSecond(avgDownload);
+      DOM.kpiAvgSub.textContent = 'Average Download';
+      DOM.kpiPeak.innerHTML = formatBitsPerSecond(peakDownload);
+      DOM.kpiPeakSub.textContent = 'Peak Download';
+      DOM.kpiLowest.innerHTML = formatBitsPerSecond(avgUpload);
+      DOM.kpiLowestSub.textContent = 'Average Upload';
+      DOM.kpiWarn.innerHTML = formatBitsPerSecond(peakUpload);
+      DOM.kpiWarnSub.textContent = 'Peak Upload';
+
+      DOM.chartTag.textContent = (selectedIp || 'No instance') + ' · ' + (startDateStr || DATE_MIN) + ' to ' + (endDateStr || DATE_MAX);
+      syncSelectedCount();
+
+      // Network Daily Average
+      const days = Object.keys(dayBuckets).sort();
+      DOM.dayCountTag.textContent = days.length + ' days';
+
+      if (days.length === 0) {
+        DOM.weekGroupContainer.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:12px 0;text-align:center;">No data available for selected period</div>';
+        return;
+      }
+
+      const weekGroups = [];
+      for (let i = 0; i < days.length; i += 7) {
+        weekGroups.push(days.slice(i, i + 7));
+      }
+
+      let dayDataMap = {};
+      days.forEach(d => {
+        const dayIndices = dayBuckets[d];
+        const downVals = dayIndices.map(i => downloadSeries[i]).filter(isFiniteNumber);
+        const upVals = dayIndices.map(i => uploadSeries[i]).filter(isFiniteNumber);
+        dayDataMap[d] = {
+          downloadValue: average(downVals),
+          uploadValue: average(upVals),
+          hasData: downVals.length > 0 || upVals.length > 0
+        };
+      });
+
+      let activeWeekIndex = null;
+      let html = '';
+      weekGroups.forEach((weekDays, weekIdx) => {
+        let weekDownTotal = 0;
+        let weekUpTotal = 0;
+        let weekCount = 0;
+        const dayData = [];
+
+        weekDays.forEach(d => {
+          const dd = dayDataMap[d] || { downloadValue: 0, uploadValue: 0, hasData: false };
+          if (dd.hasData) {
+            weekDownTotal += dd.downloadValue;
+            weekUpTotal += dd.uploadValue;
+            weekCount++;
+          }
+          dayData.push({ date: d, downloadValue: dd.downloadValue, uploadValue: dd.uploadValue, hasData: dd.hasData });
+        });
+
+        const weekDownAvg = weekCount > 0 ? weekDownTotal / weekCount : 0;
+        const weekUpAvg = weekCount > 0 ? weekUpTotal / weekCount : 0;
+        const weekStart = weekDays[0];
+        const weekEnd = weekDays[weekDays.length - 1];
+
+        html += `
+          <div class="week-group">
+            <div class="week-header" data-week-index="${weekIdx}">
+              <span class="week-chevron">▶</span>
+              <span class="week-label">Week ${weekIdx + 1}</span>
+              <span class="week-range">${weekStart} – ${weekEnd}</span>
+              <span class="week-summary">
+                <span class="avg-download">↓ ${formatBitsPerSecond(weekDownAvg)}</span> <span class="avg-upload">↑ ${formatBitsPerSecond(weekUpAvg)}</span>
+              </span>
+            </div>
+            <div class="week-days" id="weekDays-${weekIdx}">
+              <table>
+                ${dayData.map(d => {
+                  return `
+                  <tr>
+                    <td class="day">${d.date}</td>
+                    <td>
+                      <div class="network-metric-row">
+                        <div class="network-metric">
+                          <span class="network-metric-label">↓</span>
+                          <span class="network-metric-value download">${d.hasData ? formatBitsPerSecond(d.downloadValue) : '--'}</span>
+                        </div>
+                        <div class="network-metric">
+                          <span class="network-metric-label">↑</span>
+                          <span class="network-metric-value upload">${d.hasData ? formatBitsPerSecond(d.uploadValue) : '--'}</span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                `;}).join('')}
+              </table>
+            </div>
+          </div>
+        `;
+      });
+      DOM.weekGroupContainer.innerHTML = html;
+
+      const firstWeekDays = document.getElementById('weekDays-0');
+      const firstWeekHeader = document.querySelector('.week-header');
+      if (firstWeekDays && firstWeekHeader) {
+        firstWeekDays.classList.add('open');
+        firstWeekHeader.classList.add('expanded');
+      }
+      return;
+    }
+
+    // Utilization pages (disk, cpu, ram)
+    const chartLabels = thinned.map(i => formatTimeLabel(PARSED_TS[i], hourVal !== 'all'));
+    const chartValues = thinned.map(i => rowAvg(i));
+
+    const dataHash = JSON.stringify({ labels: chartLabels, values: chartValues });
+    if (dataHash !== lastChartData) {
+      lastChartData = dataHash;
+      chart.data.labels = chartLabels;
+      chart.data.datasets[0].data = chartValues;
+      chart.options.scales.x.ticks.autoSkip = !drillMode;
+      chart.options.scales.x.ticks.maxTicksLimit = drillMode ? 100 : 15;
+
+      const validValues = chartValues.filter(v => v !== null);
+      if (validValues.length > 0) {
+        const dataMin = Math.min(...validValues);
+        const dataMax = Math.max(...validValues);
+        const range = dataMax - dataMin;
+        const padding = Math.max(range * 0.2, 2);
+        chart.options.scales.y.min = Math.max(0, Math.floor(dataMin - padding));
+        chart.options.scales.y.max = Math.min(100, Math.ceil(dataMax + padding));
+      } else {
+        chart.options.scales.y.min = 0;
+        chart.options.scales.y.max = 100;
+      }
+
+      applyChartTheme(document.documentElement.getAttribute('data-theme'));
+      chart.update('none');
+      applyZoom();
+    }
+
+    const allVals = indices.map(i => rowAvg(i)).filter(v => v !== null);
+    const avg = average(allVals);
+    const lowest = allVals.length ? Math.min(...allVals) : 0;
+    const warnPct = allVals.length ? (allVals.filter(v => v >= 90).length / allVals.length * 100) : 0;
+
+    let peak = 0;
+    forEachIndexInBaseRange(i => {
+      const v = rowAvg(i);
+      if (v !== null && v > peak) peak = v;
+    });
+
+    DOM.kpiAvg.innerHTML = avg.toFixed(1) + '<small>%</small>';
+    DOM.kpiAvgSub.textContent = ip || 'No instance selected';
+    DOM.kpiPeak.innerHTML = peak.toFixed(1) + '<small>%</small>';
+    DOM.kpiPeakSub.textContent = peak >= 90 ? '▴ within warning band' : '— nominal';
+    DOM.kpiPeakSub.className = 'delta ' + (peak >= 90 ? 'up' : 'flat');
+    DOM.kpiLowest.innerHTML = lowest.toFixed(1) + '<small>%</small>';
+    DOM.kpiLowestSub.textContent = lowest < 50 ? '▾ low utilization' : '— moderate';
+    DOM.kpiLowestSub.className = 'delta ' + (lowest < 50 ? 'down' : 'flat');
+    DOM.kpiWarn.innerHTML = warnPct.toFixed(1) + '<small>%</small>';
+    DOM.kpiWarnSub.textContent = warnPct > 5 ? '▴ elevated' : '▾ within norms';
+    DOM.kpiWarnSub.className = 'delta ' + (warnPct > 5 ? 'up' : 'down');
+
+    const partitionTag = HAS_PARTITIONS ? (parts || []).length + ' partition' + ((parts || []).length !== 1 ? 's' : '') + ' · ' : '';
+    DOM.chartTag.textContent = (ip || 'No instance selected') + ' · ' + partitionTag + (startDateStr || DATE_MIN) + ' to ' + (endDateStr || DATE_MAX);
+    syncSelectedCount();
+
+    const days = Object.keys(dayBuckets).sort();
+    DOM.dayCountTag.textContent = days.length + ' days';
+
+    if (days.length === 0) {
+      DOM.weekGroupContainer.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:12px 0;text-align:center;">No data available for selected period</div>';
+      return;
+    }
+
+    const weekGroups = [];
+    for (let i = 0; i < days.length; i += 7) {
+      weekGroups.push(days.slice(i, i + 7));
+    }
+
+    let activeWeekIndex = null;
+
+    let html = '';
+    weekGroups.forEach((weekDays, weekIdx) => {
+      let weekTotal = 0;
+      let weekCount = 0;
+      let warnCount = 0;
+      const dayData = [];
+
+      weekDays.forEach(d => {
+        const dayIndices = dayBuckets[d];
+        const vals = dayIndices.map(i => rowAvg(i)).filter(v => v !== null);
+        const v = average(vals);
+        if (vals.length > 0) {
+          weekTotal += v;
+          weekCount++;
+          if (v >= 90) warnCount++;
+        }
+        dayData.push({ date: d, value: v, hasData: vals.length > 0 });
+      });
+
+      const weekAvg = weekCount > 0 ? weekTotal / weekCount : 0;
+      const weekStart = weekDays[0];
+      const weekEnd = weekDays[weekDays.length - 1];
+
+      html += `
+        <div class="week-group">
+          <div class="week-header" data-week-index="${weekIdx}">
+            <span class="week-chevron">▶</span>
+            <span class="week-label">Week ${weekIdx + 1}</span>
+            <span class="week-range">${weekStart} – ${weekEnd}</span>
+            <span class="week-summary">
+              <span class="avg">avg ${weekAvg.toFixed(1)}%</span>
+              ${warnCount > 0 ? `<span class="warn-count">⚠️ ${warnCount}d</span>` : ''}
+            </span>
+          </div>
+          <div class="week-days" id="weekDays-${weekIdx}">
+            <table>
+              ${dayData.map(d => `
+                <tr>
+                  <td class="day">${d.date}</td>
+                  <td>
+                    <div class="bar-cell">
+                      <div class="bar-track">
+                        <div class="bar-fill ${d.value >= 95 ? 'crit' : (d.value >= 90 ? 'warn' : '')}" style="width:${d.value.toFixed(1)}%"></div>
+                      </div>
+                      <span class="pct">${d.hasData ? d.value.toFixed(1) + '%' : '--'}</span>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </table>
+          </div>
+        </div>
+      `;
+    });
+
+    DOM.weekGroupContainer.innerHTML = html;
+
+    const firstWeekDays = document.getElementById('weekDays-0');
+    const firstWeekHeader = document.querySelector('.week-header');
+    if (firstWeekDays && firstWeekHeader) {
+      firstWeekDays.classList.add('open');
+      firstWeekHeader.classList.add('expanded');
+      activeWeekIndex = 0;
+    }
+
+    // Update status counts
+    let ok = 0, warn = 0, crit = 0;
+    INSTANCES.forEach(ip => {
+      const a = instanceAverages[ip];
+      if (a >= 95) crit++;
+      else if (a >= 90) warn++;
+      else ok++;
+    });
+    document.getElementById('okCount').textContent = String(ok).padStart(2, '0') + ' nodes';
+    document.getElementById('warnCount').textContent = String(warn).padStart(2, '0') + ' nodes';
+    document.getElementById('critCount').textContent = String(crit).padStart(2, '0') + ' nodes';
+  }
+
+  // ============================================================
+  //  PAGE SWITCH
+  // ============================================================
+
+  function switchPage(page) {
+    currentPage = page;
+    document.querySelectorAll('.page-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
+
+    const data = REPORT_DATA[page];
+    DOM.pageTitle.textContent = page === 'network' ? 'Network Traffic' : (page.charAt(0).toUpperCase() + page.slice(1)) + ' Utilization';
+    DOM.pageBreadcrumb.textContent = 'Infrastructure / ' + (page.charAt(0).toUpperCase() + page.slice(1)) + ' / Report';
+    DOM.chartTitle.textContent = page === 'network' ? 'Download / Upload Speed by Time' : (page.charAt(0).toUpperCase() + page.slice(1)) + ' Usage by Time';
+
+    const networkMode = page === 'network';
+    DOM.kpiAvg.parentElement.querySelector('.label').textContent = networkMode ? 'Average Download' : 'Current Average';
+    DOM.kpiPeak.parentElement.querySelector('.label').textContent = networkMode ? 'Peak Download' : 'Peak Usage';
+    DOM.kpiLowest.parentElement.querySelector('.label').textContent = networkMode ? 'Average Upload' : 'Lowest Usage';
+    DOM.kpiWarn.parentElement.querySelector('.label').textContent = networkMode ? 'Peak Upload' : 'Time in Warning';
+    DOM.emptyPageName.textContent = page.charAt(0).toUpperCase() + page.slice(1);
+
+    const statusThresholdSection = document.getElementById('statusThresholdSection');
+    if (statusThresholdSection) {
+      statusThresholdSection.style.display = networkMode ? 'none' : '';
+    }
+
+    if (!data) {
+      document.getElementById('dashboardContent').style.display = 'none';
+      document.getElementById('emptyState').style.display = 'block';
+      return;
+    }
+
+    document.getElementById('dashboardContent').style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+
+    PARSED_TS = data.timestamps.map(s => new Date(s));
+    SERIES = data.series;
+    INSTANCES = data.instance_list;
+    NETWORK_DIRECTIONS = data.directions || [];
+    DATE_MIN = data.date_min;
+    DATE_MAX = data.date_max;
+    NODES_TOTAL = data.nodes_total;
+    instanceAverages = data.instance_averages || {};
+    HAS_PARTITIONS = !!data.has_partitions;
+    PARTITIONS_BY_INSTANCE = data.partitions_by_instance || {};
+    DOM.partitionSection.style.display = HAS_PARTITIONS ? '' : 'none';
+
+    if (!networkMode) {
+      INSTANCES = INSTANCES.slice().sort((a, b) => {
+        const avgA = instanceAverages[a] || 0;
+        const avgB = instanceAverages[b] || 0;
+        const tierOf = (v) => (v >= 95 ? 2 : (v >= 90 ? 1 : 0));
+        const tierDiff = tierOf(avgB) - tierOf(avgA);
+        if (tierDiff !== 0) return tierDiff;
+        return avgB - avgA;
+      });
+    }
+
+    if (!networkMode) {
+      chart.options.plugins.legend.display = false;
+      chart.data.datasets = [{
+        label: 'Usage',
+        data: [],
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.35
+      }];
+      chart.options.scales.y.ticks.callback = (v) => v.toFixed(1) + '%';
+      chart.options.scales.y.min = 0;
+      chart.options.scales.y.max = 100;
+      applyChartTheme(document.documentElement.getAttribute('data-theme'));
+    }
+
+    updatePickerConstraints();
+
+    const list = document.getElementById('instanceList');
+    list.innerHTML = '';
+    INSTANCES.forEach((ip, idx) => {
+      const checked = idx === 0;
+      const avg = instanceAverages[ip] || 0;
+      let dotClass = '';
+      if (avg >= 95) dotClass = 'crit';
+      else if (avg >= 90) dotClass = 'warn';
+      list.insertAdjacentHTML('beforeend', `
+        <label class="dropdown-item">
+          <input type="radio" name="instance" class="instance-radio" value="${ip}" ${checked ? 'checked' : ''}>
+          <span class="dot ${dotClass}"></span>
+          <span class="ip">${ip}</span>
+        </label>
+      `);
+    });
+
+    document.querySelectorAll('.instance-radio').forEach(radio => {
+      radio.addEventListener('change', function() {
+        if (HAS_PARTITIONS) rebuildPartitionList();
+        saveCurrentPreferences();
+        debouncedRecompute();
+      });
+    });
+
+    const bounds = getDateBounds();
+    const fromDate = bounds.minDate || (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+    const toDate = bounds.maxDate || (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; })();
+
+    const defaultFrom = formatDateForPicker(fromDate);
+    const defaultTo = formatDateForPicker(toDate);
+
+    let usedDefaults = false;
+    if (!DOM.fromDateTime.value || DOM.fromDateTime.value === '') {
+      DOM.fromDateTime.value = defaultFrom;
+      usedDefaults = true;
+      if (window.fromPicker) {
+        const parsed = window.fromPicker.parseDate(defaultFrom, 'd/m/Y');
+        if (parsed) window.fromPicker.setDate(parsed, false);
+      }
+    }
+    if (!DOM.toDateTime.value || DOM.toDateTime.value === '') {
+      DOM.toDateTime.value = defaultTo;
+      usedDefaults = true;
+      if (window.toPicker) {
+        const parsed = window.toPicker.parseDate(defaultTo, 'd/m/Y');
+        if (parsed) window.toPicker.setDate(parsed, false);
+      }
+    }
+    if (usedDefaults) {
+      baseDateRange.from = DOM.fromDateTime.value;
+      baseDateRange.to = DOM.toDateTime.value;
+    }
+
+    DOM.hourSelect.value = 'all';
+    DOM.minuteSelect.value = 'all';
+    syncSelectedCount();
+
+    if (HAS_PARTITIONS) {
+      rebuildPartitionList();
+    }
+
+    resetZoom();
+    recompute();
+  }
+
+  // ============================================================
+  //  PREFERENCES SAVE/LOAD
+  // ============================================================
+
+  function saveCurrentPreferences() {
+    const prefs = {
+      page: currentPage,
+      from: DOM.fromDateTime.value,
+      to: DOM.toDateTime.value,
+      instance: selectedInstance(),
+      partitions: HAS_PARTITIONS ? selectedPartitions() : [],
+    };
+    Preferences.save(prefs);
+  }
+
+  function applyPreferences(prefs) {
+    if (!prefs) return;
+    if (prefs.page) {
+      window._pendingPage = prefs.page;
+    }
+    if (prefs.from && prefs.from !== DOM.fromDateTime.value) {
+      DOM.fromDateTime.value = prefs.from;
+      if (window.fromPicker) {
+        const parsed = window.fromPicker.parseDate(prefs.from, 'd/m/Y');
+        if (parsed) window.fromPicker.setDate(parsed, false);
+      }
+    }
+    if (prefs.to && prefs.to !== DOM.toDateTime.value) {
+      DOM.toDateTime.value = prefs.to;
+      if (window.toPicker) {
+        const parsed = window.toPicker.parseDate(prefs.to, 'd/m/Y');
+        if (parsed) window.toPicker.setDate(parsed, false);
+      }
+    }
+    if (prefs.from || prefs.to) {
+      baseDateRange.from = DOM.fromDateTime.value;
+      baseDateRange.to = DOM.toDateTime.value;
+    }
+    if (prefs.instance) {
+      window._pendingInstance = prefs.instance;
+    }
+    if (prefs.partitions && prefs.partitions.length > 0) {
+      window._pendingPartitions = prefs.partitions;
+    }
+  }
+
+  function applyPendingPreferences() {
+    if (window._pendingPage && REPORT_DATA[window._pendingPage]) {
+      const page = window._pendingPage;
+      window._pendingPage = null;
+      switchPage(page);
+      return true;
+    }
+    if (window._pendingInstance) {
+      const instance = window._pendingInstance;
+      window._pendingInstance = null;
+      const radio = document.querySelector(`.instance-radio[value="${instance}"]`);
+      if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change'));
+        return true;
+      }
+    }
+    if (window._pendingPartitions && HAS_PARTITIONS) {
+      const parts = window._pendingPartitions;
+      window._pendingPartitions = null;
+      document.querySelectorAll('.partition-checkbox').forEach(cb => {
+        cb.checked = parts.includes(cb.value);
+      });
+      syncSelectAllPartitionsState();
+      return true;
+    }
+    return false;
+  }
+
+  // ============================================================
+  //  PEAK DRILLDOWN
+  // ============================================================
+
+  function focusUsagePeak() {
+    if (isNetworkPage() || !PARSED_TS.length) return;
+    const ip = selectedInstance();
+    const parts = HAS_PARTITIONS ? selectedPartitions() : null;
+    const peakIndex = findExtremumIndexInBaseRange(i => computeRowAverage(ip, parts, i), (a, b) => a > b);
+    applyPeakDrilldown(peakIndex);
+  }
+
+  function focusUsageLowest() {
+    if (isNetworkPage() || !PARSED_TS.length) return;
+    const ip = selectedInstance();
+    const parts = HAS_PARTITIONS ? selectedPartitions() : null;
+    const lowestIndex = findExtremumIndexInBaseRange(i => computeRowAverage(ip, parts, i), (a, b) => a < b);
+    applyPeakDrilldown(lowestIndex);
+  }
+
+  function focusNetworkPeak(direction) {
+    if (!isNetworkPage() || !PARSED_TS.length) return;
+    const selectedIp = selectedInstance() || INSTANCES[0];
+    const values = (selectedIp && SERIES[selectedIp] && SERIES[selectedIp][direction]) || [];
+    const peakIndex = findExtremumIndexInBaseRange(i => values[i], (a, b) => a > b);
+    applyPeakDrilldown(peakIndex);
+  }
+
+  function applyPeakDrilldown(peakIndex) {
+    if (peakIndex < 0 || !PARSED_TS.length) return;
+
+    const peakTs = PARSED_TS[peakIndex];
+    const peakDate = formatDateForPicker(peakTs);
+
+    DOM.fromDateTime.value = peakDate;
+    DOM.toDateTime.value = peakDate;
+    setPickerDate(window.fromPicker, peakDate);
+    setPickerDate(window.toPicker, peakDate);
+
+    DOM.hourSelect.value = String(peakTs.getHours());
+    DOM.minuteSelect.value = 'all';
+    DOM.minuteSelect.disabled = false;
+    peakDrilldownActive = true;
+
+    saveCurrentPreferences();
+    recompute();
+    resetZoom();
+
+    document.getElementById('ramChart').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // ============================================================
+  //  FILTER TOGGLE
+  // ============================================================
+
+  function toggleFilterSection() {
+    const head = document.getElementById('filterSectionHead');
+    const body = document.getElementById('filterSectionBody');
+    if (!head || !body) return;
+    const collapsed = body.classList.toggle('collapsed');
+    head.classList.toggle('collapsed', collapsed);
+    head.setAttribute('aria-expanded', String(!collapsed));
+  }
+
+  // ============================================================
+  //  EVENT BINDING
+  // ============================================================
+
+  document.getElementById('sidebarToggle').addEventListener('click', () => {
+    document.getElementById('layout').classList.toggle('sidebar-collapsed');
+  });
+
+  document.querySelectorAll('.page-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      switchPage(tab.dataset.page);
+      saveCurrentPreferences();
+    });
+  });
+
+  // KPI click handlers
+  DOM.kpiPeak.closest('.kpi').addEventListener('click', () => {
+    if (isNetworkPage()) focusNetworkPeak('Download');
+    else focusUsagePeak();
+  });
+  DOM.kpiLowest.closest('.kpi').addEventListener('click', () => {
+    if (!isNetworkPage()) focusUsageLowest();
+  });
+  DOM.kpiWarn.closest('.kpi').addEventListener('click', () => focusNetworkPeak('Upload'));
+
+  DOM.hourSelect.addEventListener('change', () => {
+    peakDrilldownActive = false;
+    debouncedRecompute();
+  });
+  DOM.minuteSelect.addEventListener('change', () => {
+    peakDrilldownActive = false;
+    debouncedRecompute();
+  });
+
+  document.getElementById('resetPrefsBtn').addEventListener('click', function() {
+    if (confirm('Reset all preferences to default values?')) {
+      Preferences.clear();
+
+      const { minDate, maxDate } = getDateBounds();
+      const defaultFrom = formatDateForPicker(minDate || new Date());
+      const defaultTo = formatDateForPicker(maxDate || new Date());
+
+      DOM.fromDateTime.value = defaultFrom;
+      DOM.toDateTime.value = defaultTo;
+      if (window.fromPicker) {
+        const parsed = window.fromPicker.parseDate(defaultFrom, 'd/m/Y');
+        if (parsed) window.fromPicker.setDate(parsed, false);
+      }
+      if (window.toPicker) {
+        const parsed = window.toPicker.parseDate(defaultTo, 'd/m/Y');
+        if (parsed) window.toPicker.setDate(parsed, false);
+      }
+      peakDrilldownActive = false;
+      baseDateRange.from = defaultFrom;
+      baseDateRange.to = defaultTo;
+      const firstRadio = document.querySelector('.instance-radio');
+      if (firstRadio) {
+        firstRadio.checked = true;
+        if (HAS_PARTITIONS) rebuildPartitionList();
+      }
+
+      switchPage(currentPage);
+      debouncedRecompute();
+      saveCurrentPreferences();
+    }
+  });
+
+  document.getElementById('instanceSearch').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('.dropdown-item').forEach(item => {
+      const ip = item.querySelector('.ip').textContent.toLowerCase();
+      item.style.display = ip.includes(q) ? '' : 'none';
+    });
+  });
+
+  document.getElementById('partitionSearch').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#partitionList .dropdown-item').forEach(item => {
+      const p = item.querySelector('.ip').textContent.toLowerCase();
+      item.style.display = p.includes(q) ? '' : 'none';
+    });
+  });
+
+  document.getElementById('selectAllPartitions').addEventListener('change', function() {
+    document.querySelectorAll('.partition-checkbox').forEach(cb => cb.checked = this.checked);
+    syncSelectAllPartitionsState();
+    saveCurrentPreferences();
+    debouncedRecompute();
+  });
+
+  let resizeTimeout;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => chart.resize(), 250);
+  });
+
+  // Populate hour dropdown
+  for (let h = 0; h < 24; h++) {
+    const opt = document.createElement('option');
+    opt.value = String(h);
+    opt.textContent = String(h).padStart(2, '0') + ':00';
+    DOM.hourSelect.appendChild(opt);
+  }
+
+  // Populate minute dropdown
+  for (let m = 0; m < 60; m++) {
+    const opt = document.createElement('option');
+    opt.value = String(m);
+    opt.textContent = ':' + String(m).padStart(2, '0');
+    DOM.minuteSelect.appendChild(opt);
+  }
+
+  // ============================================================
+  //  BOOT
+  // ============================================================
+
+  async function boot() {
+    if (typeof DecompressionStream === 'undefined') {
+      document.body.innerHTML =
+        '<div style="padding:40px;font-family:monospace;color:#E7ECF5;background:#0A0F1C;">' +
+        'This report needs a browser with native gzip decompression support ' +
+        '(Chrome, Edge, Firefox, or Safari, recent versions).</div>';
+      return;
+    }
+
+    const bootSkeleton = document.getElementById('bootSkeleton');
+    bootSkeleton.classList.add('visible');
+
+    try {
+      REPORT_DATA = await decompressReportData(REPORT_DATA_B64);
+    } finally {
+      bootSkeleton.classList.remove('visible');
+    }
+
+    document.querySelectorAll('.page-tab').forEach(t => {
+      if (!REPORT_DATA[t.dataset.page]) t.classList.add('empty');
+    });
+
+    initDateTimePickers();
+
+    const prefs = loadPreferences();
+    if (prefs) {
+      applyPreferences(prefs);
+    }
+
+    switchPage(ACTIVE_PAGE);
+
+    setTimeout(() => {
+      applyPendingPreferences();
+      saveCurrentPreferences();
+    }, 100);
+  }
+
+  boot();
+</script>
+
 </body>
 </html>`;
     }
 
     // ============================================================
-    //  EVENT HANDLERS
+    //  EVENT HANDLERS (uploader)
     // ============================================================
 
     uploadZone.addEventListener('click', () => fileInput.click());
