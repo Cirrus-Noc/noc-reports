@@ -1,1 +1,823 @@
-<h1>gwrgwrg</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cirrus · Report Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: #0A0F1C;
+            color: #E7ECF5;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 650px;
+            width: 100%;
+            background: #101828;
+            border: 1px solid #1E293F;
+            border-radius: 20px;
+            padding: 48px;
+        }
+        .logo {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            color: #2FD4C4;
+            margin-bottom: 4px;
+        }
+        .subtitle {
+            color: #8B96AC;
+            margin-bottom: 32px;
+            font-size: 14px;
+        }
+        .upload-zone {
+            border: 3px dashed #1E293F;
+            border-radius: 16px;
+            padding: 48px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+        .upload-zone:hover,
+        .upload-zone.dragover {
+            border-color: #2FD4C4;
+            background: rgba(47, 212, 196, 0.05);
+        }
+        .upload-zone .icon {
+            font-size: 48px;
+            display: block;
+            margin-bottom: 12px;
+        }
+        .upload-zone p {
+            color: #8B96AC;
+            font-size: 14px;
+        }
+        .upload-zone .supported {
+            font-size: 12px;
+            color: #5B677E;
+            margin-top: 12px;
+            font-family: monospace;
+        }
+        #fileInput {
+            display: none;
+        }
+        .file-list {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 16px 0;
+            min-height: 40px;
+        }
+        .file-badge {
+            background: #141E33;
+            border: 1px solid #1E293F;
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: monospace;
+        }
+        .file-badge .remove {
+            color: #F0684F;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .file-badge .remove:hover {
+            color: #ff7a6a;
+        }
+        .status {
+            font-size: 13px;
+            color: #8B96AC;
+            margin: 12px 0;
+            min-height: 24px;
+        }
+        .status.success {
+            color: #33D17A;
+        }
+        .status.error {
+            color: #F0684F;
+        }
+        .btn {
+            background: #2FD4C4;
+            color: #06110F;
+            border: none;
+            border-radius: 10px;
+            padding: 14px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+        .btn:hover {
+            background: #3DE8D6;
+            transform: scale(1.01);
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .btn.secondary {
+            background: #1E293F;
+            color: #E7ECF5;
+            margin-top: 10px;
+        }
+        .btn.secondary:hover {
+            background: #2a3a55;
+        }
+        .progress {
+            width: 100%;
+            height: 4px;
+            background: #1E293F;
+            border-radius: 2px;
+            margin: 16px 0;
+            overflow: hidden;
+            display: none;
+        }
+        .progress.active {
+            display: block;
+        }
+        .progress .bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #2FD4C4, #4C8DFF);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+        .footer {
+            margin-top: 24px;
+            text-align: center;
+            font-size: 12px;
+            color: #5B677E;
+            border-top: 1px solid #1E293F;
+            padding-top: 20px;
+        }
+        .footer a {
+            color: #2FD4C4;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        .debug {
+            font-family: monospace;
+            font-size: 11px;
+            color: #5B677E;
+            margin-top: 12px;
+            padding: 8px;
+            background: #0A0F1C;
+            border-radius: 6px;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .debug.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="logo">Cirrus</div>
+        <p class="subtitle">Generate infrastructure reports from Parquet files — entirely in your browser</p>
+
+        <div class="upload-zone" id="uploadZone">
+            <span class="icon">📁</span>
+            <p><strong>Drop your Parquet files here</strong> or click to browse</p>
+            <div class="supported">Supports: disk.parquet · cpu_ram.parquet · network.parquet</div>
+        </div>
+
+        <input type="file" id="fileInput" multiple accept=".parquet">
+
+        <div class="file-list" id="fileList"></div>
+
+        <div class="status" id="status">Ready to generate report</div>
+
+        <div class="progress" id="progress">
+            <div class="bar" id="progressBar"></div>
+        </div>
+
+        <button class="btn" id="generateBtn" disabled>📊 Generate Report</button>
+        <button class="btn secondary" id="resetBtn" style="display:none;">🔄 Start Over</button>
+
+        <div class="footer">
+            All processing happens locally · <a href="#" id="downloadLink" style="display:none;">Download report</a>
+        </div>
+
+        <div class="debug" id="debug"></div>
+    </div>
+
+    <!-- Try loading parquetjs from unpkg (sometimes works better) -->
+    <script src="https://unpkg.com/parquetjs@0.11.2/lib/parquet.min.js"></script>
+    <script>
+        // ============================================================
+        //  STATE
+        // ============================================================
+        const state = {
+            files: {},
+            templateHtml: null,
+        };
+
+        // ============================================================
+        //  DOM REFS
+        // ============================================================
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const status = document.getElementById('status');
+        const generateBtn = document.getElementById('generateBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const progress = document.getElementById('progress');
+        const progressBar = document.getElementById('progressBar');
+        const downloadLink = document.getElementById('downloadLink');
+        const debug = document.getElementById('debug');
+
+        function debugLog(msg) {
+            console.log(msg);
+            debug.textContent += msg + '\n';
+            debug.classList.add('visible');
+            debug.scrollTop = debug.scrollHeight;
+        }
+
+        // ============================================================
+        //  STATUS HELPER
+        // ============================================================
+        function setStatus(msg, type = '') {
+            debugLog('Status: ' + msg + (type ? ' (' + type + ')' : ''));
+            status.textContent = msg;
+            status.className = 'status' + (type ? ' ' + type : '');
+        }
+
+        function setProgress(pct) {
+            progress.classList.add('active');
+            progressBar.style.width = pct + '%';
+        }
+
+        function hideProgress() {
+            progress.classList.remove('active');
+            progressBar.style.width = '0%';
+        }
+
+        // ============================================================
+        //  PARQUET READER (using parquetjs)
+        // ============================================================
+        async function readParquetFile(file) {
+            debugLog('Reading file: ' + file.name + ' (' + file.size + ' bytes)');
+            
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async function(e) {
+                    try {
+                        const arrayBuffer = e.target.result;
+                        const uint8Array = new Uint8Array(arrayBuffer);
+                        
+                        // Check if parquetjs is available
+                        if (typeof parquetjs === 'undefined') {
+                            // Try to get it from window
+                            if (typeof window.parquetjs !== 'undefined') {
+                                window.parquet = window.parquetjs;
+                            } else {
+                                throw new Error('parquetjs library not loaded. Please refresh.');
+                            }
+                        }
+                        
+                        const parquet = window.parquetjs || parquetjs;
+                        debugLog('Parsing Parquet file...');
+                        
+                        // Parse using parquetjs
+                        const reader = await parquet.ParquetReader.fromBuffer(uint8Array);
+                        const cursor = reader.getCursor();
+                        const records = [];
+                        let record = null;
+                        
+                        while ((record = await cursor.next())) {
+                            records.push(record);
+                        }
+                        
+                        await reader.close();
+                        debugLog('Read ' + records.length + ' rows from ' + file.name);
+                        resolve(records);
+                    } catch (err) {
+                        debugLog('Error parsing parquet: ' + err.message);
+                        reject(err);
+                    }
+                };
+                reader.onerror = function(err) {
+                    debugLog('FileReader error: ' + err.message);
+                    reject(err);
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // ============================================================
+        //  FILE HANDLING
+        // ============================================================
+        function getFileType(filename) {
+            const name = filename.toLowerCase();
+            if (name === 'disk.parquet') return 'disk';
+            if (name === 'cpu_ram.parquet') return 'cpu_ram';
+            if (name === 'network.parquet') return 'network';
+            return null;
+        }
+
+        async function handleFiles(files) {
+            debugLog('handleFiles called with ' + files.length + ' files');
+
+            // Check if parquetjs is loaded
+            if (typeof parquetjs === 'undefined' && typeof window.parquetjs === 'undefined') {
+                setStatus('❌ Parquet library not loaded. Please refresh the page.', 'error');
+                debugLog('parquetjs is not defined');
+                return;
+            }
+
+            for (const file of files) {
+                debugLog('Processing file: ' + file.name);
+                const type = getFileType(file.name);
+                
+                if (!type) {
+                    setStatus(`Skipping "${file.name}" — not recognized`, 'error');
+                    continue;
+                }
+
+                if (state.files[type]) {
+                    setStatus(`Already have ${type}.parquet, skipping duplicate`, 'error');
+                    continue;
+                }
+
+                try {
+                    setStatus(`Reading ${file.name}...`, '');
+                    const data = await readParquetFile(file);
+                    state.files[type] = data;
+                    setStatus(`✅ Loaded ${file.name} (${data.length} rows)`, 'success');
+                    renderFileList();
+                    updateGenerateButton();
+                } catch (err) {
+                    debugLog('Error reading file: ' + err.message);
+                    setStatus(`❌ Error reading ${file.name}: ${err.message}`, 'error');
+                }
+            }
+        }
+
+        function removeFile(type) {
+            debugLog('Removing file: ' + type);
+            delete state.files[type];
+            renderFileList();
+            updateGenerateButton();
+            setStatus(`Removed ${type}.parquet`, '');
+        }
+
+        function renderFileList() {
+            const types = Object.keys(state.files);
+            debugLog('Rendering file list: ' + types.join(', '));
+            
+            if (types.length === 0) {
+                fileList.innerHTML = '';
+                return;
+            }
+
+            fileList.innerHTML = types.map(type =>
+                `<span class="file-badge">
+                    ✅ ${type}.parquet
+                    <span class="remove" onclick="removeFile('${type}')">×</span>
+                </span>`
+            ).join('');
+        }
+
+        function updateGenerateButton() {
+            const hasAny = !!state.files.disk || !!state.files.cpu_ram || !!state.files.network;
+            debugLog('Update generate button: hasAny=' + hasAny + ', templateLoaded=' + !!state.templateHtml);
+            
+            const parquetLoaded = typeof parquetjs !== 'undefined' || typeof window.parquetjs !== 'undefined';
+            
+            generateBtn.disabled = !hasAny || !state.templateHtml || !parquetLoaded;
+            
+            if (!parquetLoaded) {
+                generateBtn.textContent = '⏳ Loading Parquet library...';
+            } else if (hasAny && state.templateHtml) {
+                const parts = [];
+                if (state.files.disk) parts.push('Disk');
+                if (state.files.cpu_ram) parts.push('CPU/RAM');
+                if (state.files.network) parts.push('Network');
+                generateBtn.textContent = `📊 Generate Report (${parts.join(', ')})`;
+            } else if (!state.templateHtml) {
+                generateBtn.textContent = '⏳ Loading template...';
+            } else {
+                generateBtn.textContent = '📊 Upload Parquet files to start';
+            }
+        }
+
+        // ============================================================
+        //  EVENT HANDLERS
+        // ============================================================
+
+        uploadZone.addEventListener('click', function(e) {
+            debugLog('Upload zone clicked');
+            fileInput.click();
+        });
+
+        uploadZone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            debugLog('Drop event');
+            uploadZone.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            debugLog('Files dropped: ' + files.length);
+            
+            if (files.length > 0) {
+                handleFiles(files);
+            }
+        });
+
+        fileInput.addEventListener('change', function(e) {
+            debugLog('File input change');
+            const files = e.target.files;
+            debugLog('Selected files: ' + files.length);
+            
+            if (files.length > 0) {
+                handleFiles(files);
+            }
+            fileInput.value = '';
+        });
+
+        generateBtn.addEventListener('click', function() {
+            debugLog('Generate button clicked');
+            generateReport();
+        });
+
+        resetBtn.addEventListener('click', function() {
+            debugLog('Reset button clicked');
+            state.files = {};
+            renderFileList();
+            updateGenerateButton();
+            setStatus('Ready to generate report', '');
+            downloadLink.style.display = 'none';
+            resetBtn.style.display = 'none';
+            generateBtn.disabled = true;
+            hideProgress();
+        });
+
+        // ============================================================
+        //  LOAD TEMPLATE
+        // ============================================================
+
+        async function loadTemplate() {
+            try {
+                debugLog('Loading report template...');
+                setStatus('Loading template...', '');
+                const response = await fetch('report_template.html');
+                if (!response.ok) throw new Error('Template not found (HTTP ' + response.status + ')');
+                state.templateHtml = await response.text();
+                debugLog('Template loaded, length: ' + state.templateHtml.length);
+                setStatus('✅ Template loaded', 'success');
+                updateGenerateButton();
+            } catch (err) {
+                debugLog('Failed to load template: ' + err.message);
+                setStatus(`❌ Error loading template: ${err.message}`, 'error');
+                generateBtn.textContent = '⚠️ Template missing';
+            }
+        }
+
+        // ============================================================
+        //  DATA PROCESSING
+        // ============================================================
+
+        function processUtilizationData(rows, metricTypeFilter = null) {
+            if (!rows || rows.length === 0) return null;
+
+            let df = rows;
+            if (metricTypeFilter && rows[0] && rows[0].metric_type !== undefined) {
+                df = rows.filter(r => r.metric_type === metricTypeFilter);
+            }
+            if (df.length === 0) return null;
+
+            const records = df.map(r => {
+                const ts = new Date(r.time || r.timestamp);
+                return {
+                    timestamp: isNaN(ts.getTime()) ? null : ts,
+                    instance_ip: r.instance || r.instance_ip || 'unknown',
+                    usage_pct: parseFloat(r['value_%'] || r.disk_usage_% || r.usage_pct || 0),
+                    partition: r.device || r.partition || null
+                };
+            }).filter(r => r.timestamp && !isNaN(r.usage_pct));
+
+            if (records.length === 0) return null;
+
+            const hasPartitions = records.some(r => r.partition);
+            const grouped = {};
+
+            for (const row of records) {
+                const key = hasPartitions
+                    ? `${row.timestamp.toISOString()}|${row.instance_ip}|${row.partition}`
+                    : `${row.timestamp.toISOString()}|${row.instance_ip}`;
+                if (!grouped[key]) {
+                    grouped[key] = { ...row, count: 0, sum: 0 };
+                }
+                grouped[key].sum += row.usage_pct;
+                grouped[key].count += 1;
+            }
+
+            const averaged = Object.values(grouped).map(g => ({
+                ...g,
+                usage_pct: g.sum / g.count
+            }));
+            averaged.sort((a, b) => a.timestamp - b.timestamp);
+
+            const timestamps = [];
+            const series = {};
+            const instanceList = new Set();
+            const partitionsByInstance = {};
+            const instanceAverages = {};
+
+            for (const row of averaged) {
+                const ts = row.timestamp.toISOString();
+                if (!timestamps.includes(ts)) timestamps.push(ts);
+
+                const ip = row.instance_ip;
+                instanceList.add(ip);
+
+                if (hasPartitions) {
+                    const part = row.partition || 'root';
+                    if (!series[ip]) series[ip] = {};
+                    if (!series[ip][part]) series[ip][part] = [];
+                    series[ip][part].push(row.usage_pct);
+                    if (!partitionsByInstance[ip]) partitionsByInstance[ip] = new Set();
+                    partitionsByInstance[ip].add(part);
+                } else {
+                    if (!series[ip]) series[ip] = [];
+                    series[ip].push(row.usage_pct);
+                }
+            }
+
+            for (const ip of instanceList) {
+                if (partitionsByInstance[ip]) {
+                    partitionsByInstance[ip] = Array.from(partitionsByInstance[ip]).sort();
+                }
+                let values = [];
+                if (hasPartitions) {
+                    for (const part in series[ip]) {
+                        values = values.concat(series[ip][part]);
+                    }
+                } else {
+                    values = series[ip];
+                }
+                values = values.filter(v => v !== null && v !== undefined && !isNaN(v));
+                instanceAverages[ip] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+            }
+
+            return {
+                page_type: 'utilization',
+                has_partitions: hasPartitions,
+                timestamps: timestamps,
+                series: series,
+                instance_list: Array.from(instanceList),
+                instance_averages: instanceAverages,
+                partitions_by_instance: partitionsByInstance,
+                date_min: timestamps.length ? timestamps[0].slice(0, 10) : '',
+                date_max: timestamps.length ? timestamps[timestamps.length - 1].slice(0, 10) : '',
+                nodes_total: instanceList.size,
+            };
+        }
+
+        function processNetworkData(rows) {
+            if (!rows || rows.length === 0) return null;
+
+            const records = rows.map(r => ({
+                timestamp: new Date(r.time || r.timestamp),
+                instance: r.instance || r.instance_ip || 'unknown',
+                direction: r.traffic_direction || 'unknown',
+                bits_per_sec: parseFloat(r.value_bits_per_sec || r.bits_per_sec || 0),
+                server_name: r.server_name || '',
+                interface: r.interface || '',
+            })).filter(r => r.timestamp && !isNaN(r.timestamp) && !isNaN(r.bits_per_sec));
+
+            if (records.length === 0) return null;
+
+            const grouped = {};
+            for (const row of records) {
+                const key = `${row.timestamp.toISOString()}|${row.instance}|${row.direction}`;
+                if (!grouped[key]) {
+                    grouped[key] = { ...row, sum: 0, count: 0 };
+                }
+                grouped[key].sum += row.bits_per_sec;
+                grouped[key].count += 1;
+            }
+
+            const averaged = Object.values(grouped).map(g => ({
+                ...g,
+                bits_per_sec: g.sum
+            }));
+            averaged.sort((a, b) => a.timestamp - b.timestamp);
+
+            const timestamps = [];
+            const timestampSet = new Set();
+            const series = {};
+            const instanceList = new Set();
+            const directions = new Set();
+
+            for (const row of averaged) {
+                const ts = row.timestamp.toISOString();
+                if (!timestampSet.has(ts)) {
+                    timestampSet.add(ts);
+                    timestamps.push(ts);
+                }
+                const ip = row.instance;
+                instanceList.add(ip);
+                directions.add(row.direction);
+                if (!series[ip]) series[ip] = {};
+                if (!series[ip][row.direction]) series[ip][row.direction] = [];
+                series[ip][row.direction].push(row.bits_per_sec);
+            }
+
+            return {
+                page_type: 'network',
+                timestamps: timestamps,
+                directions: Array.from(directions),
+                series: series,
+                instance_list: Array.from(instanceList),
+                date_min: timestamps.length ? timestamps[0].slice(0, 10) : '',
+                date_max: timestamps.length ? timestamps[timestamps.length - 1].slice(0, 10) : '',
+                nodes_total: instanceList.size,
+            };
+        }
+
+        // ============================================================
+        //  GZIP COMPRESSION
+        // ============================================================
+
+        async function gzipCompress(str) {
+            const bytes = new TextEncoder().encode(str);
+            const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+            const compressed = await new Response(stream).arrayBuffer();
+            return new Uint8Array(compressed);
+        }
+
+        // ============================================================
+        //  GENERATE REPORT
+        // ============================================================
+
+        async function generateReport() {
+            debugLog('generateReport called with files: ' + Object.keys(state.files).join(', '));
+            setStatus('Generating report...', '');
+            
+            try {
+                const reportData = {};
+                let totalSteps = 0;
+                let completedSteps = 0;
+
+                if (state.files.disk) totalSteps++;
+                if (state.files.cpu_ram) totalSteps += 2;
+                if (state.files.network) totalSteps++;
+
+                setProgress(0);
+
+                if (state.files.disk) {
+                    try {
+                        const result = processUtilizationData(state.files.disk);
+                        reportData.disk = result;
+                        completedSteps++;
+                        setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed disk data');
+                    } catch (err) {
+                        debugLog('Error processing disk: ' + err.message);
+                        setStatus(`❌ Error processing disk: ${err.message}`, 'error');
+                        return;
+                    }
+                }
+
+                if (state.files.cpu_ram) {
+                    try {
+                        const cpu = processUtilizationData(state.files.cpu_ram, 'CPU');
+                        const ram = processUtilizationData(state.files.cpu_ram, 'RAM');
+                        reportData.cpu = cpu;
+                        reportData.ram = ram;
+                        completedSteps += 2;
+                        setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed CPU/RAM data');
+                    } catch (err) {
+                        debugLog('Error processing CPU/RAM: ' + err.message);
+                        setStatus(`❌ Error processing CPU/RAM: ${err.message}`, 'error');
+                        return;
+                    }
+                }
+
+                if (state.files.network) {
+                    try {
+                        const result = processNetworkData(state.files.network);
+                        reportData.network = result;
+                        completedSteps++;
+                        setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed network data');
+                    } catch (err) {
+                        debugLog('Error processing network: ' + err.message);
+                        setStatus(`❌ Error processing network: ${err.message}`, 'error');
+                        return;
+                    }
+                }
+
+                setStatus('Building HTML report...', '');
+
+                const activePage = reportData.disk ? 'disk' :
+                                  reportData.cpu ? 'cpu' :
+                                  reportData.network ? 'network' : 'disk';
+
+                const jsonStr = JSON.stringify(reportData);
+                const compressed = await gzipCompress(jsonStr);
+                const b64 = btoa(String.fromCharCode(...compressed));
+
+                debugLog('Data compressed, size: ' + compressed.length + ' bytes');
+
+                let html = state.templateHtml;
+                html = html.replace('const REPORT_DATA_B64 = \'\';', `const REPORT_DATA_B64 = '${b64}';`);
+                html = html.replace('const ACTIVE_PAGE = \'\';', `const ACTIVE_PAGE = '${activePage}';`);
+
+                const blob = new Blob([html], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                downloadLink.href = url;
+                downloadLink.download = `cirrus-report-${new Date().toISOString().slice(0, 10)}.html`;
+                downloadLink.style.display = 'inline';
+                downloadLink.textContent = '📥 Download Full Report';
+
+                setStatus('✅ Report ready! Click the download link below.', 'success');
+                resetBtn.style.display = 'block';
+                generateBtn.disabled = true;
+                hideProgress();
+                
+                debugLog('Report generation complete');
+                
+            } catch (err) {
+                debugLog('Error generating report: ' + err.message);
+                setStatus('❌ Error generating report: ' + err.message, 'error');
+            }
+        }
+
+        // ============================================================
+        //  CHECK PARQUET LIBRARY LOADED
+        // ============================================================
+
+        function checkParquetLoaded() {
+            if (typeof parquetjs !== 'undefined' || typeof window.parquetjs !== 'undefined') {
+                debugLog('✅ parquetjs library loaded');
+                setStatus('✅ Parquet library ready', 'success');
+                updateGenerateButton();
+                return true;
+            } else {
+                debugLog('⏳ Waiting for parquetjs to load...');
+                setTimeout(checkParquetLoaded, 500);
+                return false;
+            }
+        }
+
+        // ============================================================
+        //  INIT
+        // ============================================================
+
+        async function init() {
+            debugLog('Initializing...');
+            
+            // Load template
+            await loadTemplate();
+            
+            // Check for parquetjs
+            setTimeout(checkParquetLoaded, 100);
+            
+            setStatus('Ready — upload your Parquet files', '');
+            updateGenerateButton();
+            debugLog('Initialization complete');
+        }
+
+        // Start the app
+        init();
+    </script>
+</body>
+</html>
