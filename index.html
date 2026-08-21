@@ -173,6 +173,21 @@
         .footer a:hover {
             text-decoration: underline;
         }
+        .debug {
+            font-family: monospace;
+            font-size: 11px;
+            color: #5B677E;
+            margin-top: 12px;
+            padding: 8px;
+            background: #0A0F1C;
+            border-radius: 6px;
+            max-height: 100px;
+            overflow-y: auto;
+            display: none;
+        }
+        .debug.visible {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -203,15 +218,23 @@
         <div class="footer">
             All processing happens locally · <a href="#" id="downloadLink" style="display:none;">Download report</a>
         </div>
+
+        <div class="debug" id="debug"></div>
     </div>
 
-    <!-- Apache Arrow for Parquet reading -->
-    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@16.1.0/Arrow.esm.min.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "parquet-wasm": "https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js"
+        }
+    }
+    </script>
+
     <script type="module">
         // ============================================================
-        //  IMPORT APACHE ARROW
+        //  IMPORTS
         // ============================================================
-        import { tableFromIPC, tableToIPC, tableFromArrays } from 'https://cdn.jsdelivr.net/npm/apache-arrow@16.1.0/Arrow.esm.min.js';
+        import * as parquet from 'parquet-wasm';
 
         // ============================================================
         //  STATE
@@ -233,12 +256,19 @@
         const progress = document.getElementById('progress');
         const progressBar = document.getElementById('progressBar');
         const downloadLink = document.getElementById('downloadLink');
+        const debug = document.getElementById('debug');
+
+        function debugLog(msg) {
+            console.log(msg);
+            debug.textContent += msg + '\n';
+            debug.classList.add('visible');
+        }
 
         // ============================================================
         //  STATUS HELPER
         // ============================================================
         function setStatus(msg, type = '') {
-            console.log('Status:', msg, type);
+            debugLog('Status: ' + msg + (type ? ' (' + type + ')' : ''));
             status.textContent = msg;
             status.className = 'status' + (type ? ' ' + type : '');
         }
@@ -254,96 +284,28 @@
         }
 
         // ============================================================
-        //  PARQUET READER (using Apache Arrow's Parquet reader via wasm)
+        //  PARQUET READER (using parquet-wasm via ESM)
         // ============================================================
         async function readParquetFile(file) {
-            console.log('Reading file:', file.name, file.size, 'bytes');
+            debugLog('Reading file: ' + file.name + ' (' + file.size + ' bytes)');
             
-            // For now, use a simpler approach - we'll load the parquet file as JSON
-            // Since Apache Arrow's Parquet reader requires WASM setup, let's use a different approach
-            // We'll parse the Parquet file using a pure JS fallback
-            
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = async function(e) {
-                    try {
-                        // For testing, let's try to parse as JSON first (if it's a test file)
-                        // In production, we need a proper Parquet parser
-                        const content = e.target.result;
-                        
-                        // Try to parse as JSON (for testing with JSON files)
-                        try {
-                            const jsonData = JSON.parse(content);
-                            console.log('Parsed as JSON, rows:', jsonData.length);
-                            resolve(jsonData);
-                            return;
-                        } catch (jsonErr) {
-                            // Not JSON, try to read as Parquet
-                            console.log('Not JSON, trying Parquet...');
-                            
-                            // For now, since we don't have a working Parquet parser in browser,
-                            // let's use a simpler approach: read as text and try to parse as CSV
-                            // or just display a message
-                            
-                            // Actually, let's use a fetch-based approach with a Parquet server
-                            // Or for now, let's create a sample data structure
-                            
-                            // This is a TEMPORARY solution - we'll read the file as text
-                            // and try to parse it as CSV (for testing)
-                            try {
-                                const text = new TextDecoder().decode(new Uint8Array(content));
-                                console.log('File content preview:', text.substring(0, 200));
-                                
-                                // Try to parse as CSV
-                                const lines = text.split('\n').filter(line => line.trim());
-                                if (lines.length > 1) {
-                                    const headers = lines[0].split(',').map(h => h.trim());
-                                    const data = [];
-                                    for (let i = 1; i < lines.length; i++) {
-                                        const values = lines[i].split(',').map(v => v.trim());
-                                        if (values.length === headers.length) {
-                                            const row = {};
-                                            headers.forEach((h, idx) => {
-                                                row[h] = values[idx];
-                                            });
-                                            data.push(row);
-                                        }
-                                    }
-                                    console.log('Parsed as CSV, rows:', data.length);
-                                    resolve(data);
-                                    return;
-                                }
-                            } catch (csvErr) {
-                                console.error('CSV parsing failed:', csvErr);
-                            }
-                            
-                            // If we can't parse it, return a sample structure for testing
-                            console.log('Creating sample data for testing...');
-                            const sampleData = [];
-                            const now = new Date();
-                            for (let i = 0; i < 100; i++) {
-                                const ts = new Date(now.getTime() - i * 60000);
-                                sampleData.push({
-                                    timestamp: ts.toISOString(),
-                                    instance: 'test-server',
-                                    instance_ip: '192.168.1.1',
-                                    usage_pct: 20 + Math.random() * 70,
-                                    device: '/dev/sda1',
-                                });
-                            }
-                            resolve(sampleData);
-                        }
-                    } catch (err) {
-                        console.error('Error parsing file:', err);
-                        reject(err);
-                    }
-                };
-                reader.onerror = function(err) {
-                    console.error('FileReader error:', err);
-                    reject(err);
-                };
-                reader.readAsArrayBuffer(file);
-            });
+            try {
+                // Read file as ArrayBuffer
+                const buffer = await file.arrayBuffer();
+                const bytes = new Uint8Array(buffer);
+                
+                debugLog('Creating Parquet reader...');
+                
+                // Use parquet-wasm to read
+                const reader = parquet.ParquetReader.fromBytes(bytes);
+                const records = reader.readAll();
+                
+                debugLog('Read ' + records.length + ' rows from ' + file.name);
+                return records;
+            } catch (err) {
+                debugLog('Error reading Parquet: ' + err.message);
+                throw err;
+            }
         }
 
         // ============================================================
@@ -358,10 +320,10 @@
         }
 
         async function handleFiles(files) {
-            console.log('handleFiles called with', files.length, 'files');
+            debugLog('handleFiles called with ' + files.length + ' files');
 
             for (const file of files) {
-                console.log('Processing file:', file.name);
+                debugLog('Processing file: ' + file.name);
                 const type = getFileType(file.name);
                 
                 if (!type) {
@@ -382,14 +344,14 @@
                     renderFileList();
                     updateGenerateButton();
                 } catch (err) {
-                    console.error('Error reading file:', err);
+                    debugLog('Error reading file: ' + err.message);
                     setStatus(`❌ Error reading ${file.name}: ${err.message}`, 'error');
                 }
             }
         }
 
         function removeFile(type) {
-            console.log('Removing file:', type);
+            debugLog('Removing file: ' + type);
             delete state.files[type];
             renderFileList();
             updateGenerateButton();
@@ -398,7 +360,7 @@
 
         function renderFileList() {
             const types = Object.keys(state.files);
-            console.log('Rendering file list:', types);
+            debugLog('Rendering file list: ' + types.join(', '));
             
             if (types.length === 0) {
                 fileList.innerHTML = '';
@@ -415,7 +377,7 @@
 
         function updateGenerateButton() {
             const hasAny = !!state.files.disk || !!state.files.cpu_ram || !!state.files.network;
-            console.log('Update generate button, hasAny:', hasAny, 'template loaded:', !!state.templateHtml);
+            debugLog('Update generate button: hasAny=' + hasAny + ', templateLoaded=' + !!state.templateHtml);
             
             generateBtn.disabled = !hasAny || !state.templateHtml;
             
@@ -438,7 +400,7 @@
 
         // Click to upload
         uploadZone.addEventListener('click', function(e) {
-            console.log('Upload zone clicked');
+            debugLog('Upload zone clicked');
             fileInput.click();
         });
 
@@ -446,7 +408,6 @@
         uploadZone.addEventListener('dragover', function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Drag over');
             uploadZone.classList.add('dragover');
         });
 
@@ -454,7 +415,6 @@
         uploadZone.addEventListener('dragleave', function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Drag leave');
             uploadZone.classList.remove('dragover');
         });
 
@@ -462,11 +422,11 @@
         uploadZone.addEventListener('drop', function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Drop event');
+            debugLog('Drop event');
             uploadZone.classList.remove('dragover');
             
             const files = e.dataTransfer.files;
-            console.log('Files dropped:', files.length);
+            debugLog('Files dropped: ' + files.length);
             
             if (files.length > 0) {
                 handleFiles(files);
@@ -475,26 +435,25 @@
 
         // File input change
         fileInput.addEventListener('change', function(e) {
-            console.log('File input change');
+            debugLog('File input change');
             const files = e.target.files;
-            console.log('Selected files:', files.length);
+            debugLog('Selected files: ' + files.length);
             
             if (files.length > 0) {
                 handleFiles(files);
             }
-            // Reset so user can select the same file again
             fileInput.value = '';
         });
 
         // Generate button
         generateBtn.addEventListener('click', function() {
-            console.log('Generate button clicked');
+            debugLog('Generate button clicked');
             generateReport();
         });
 
         // Reset button
         resetBtn.addEventListener('click', function() {
-            console.log('Reset button clicked');
+            debugLog('Reset button clicked');
             state.files = {};
             renderFileList();
             updateGenerateButton();
@@ -511,16 +470,16 @@
 
         async function loadTemplate() {
             try {
-                console.log('Loading report template...');
+                debugLog('Loading report template...');
                 setStatus('Loading template...', '');
                 const response = await fetch('report_template.html');
                 if (!response.ok) throw new Error('Template not found (HTTP ' + response.status + ')');
                 state.templateHtml = await response.text();
-                console.log('Template loaded, length:', state.templateHtml.length);
+                debugLog('Template loaded, length: ' + state.templateHtml.length);
                 setStatus('✅ Template loaded', 'success');
                 updateGenerateButton();
             } catch (err) {
-                console.error('Failed to load template:', err);
+                debugLog('Failed to load template: ' + err.message);
                 setStatus(`❌ Error loading template: ${err.message}`, 'error');
                 generateBtn.textContent = '⚠️ Template missing';
             }
@@ -705,7 +664,7 @@
         // ============================================================
 
         async function generateReport() {
-            console.log('generateReport called with files:', Object.keys(state.files));
+            debugLog('generateReport called with files: ' + Object.keys(state.files).join(', '));
             setStatus('Generating report...', '');
             
             try {
@@ -725,7 +684,9 @@
                         reportData.disk = result;
                         completedSteps++;
                         setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed disk data');
                     } catch (err) {
+                        debugLog('Error processing disk: ' + err.message);
                         setStatus(`❌ Error processing disk: ${err.message}`, 'error');
                         return;
                     }
@@ -739,7 +700,9 @@
                         reportData.ram = ram;
                         completedSteps += 2;
                         setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed CPU/RAM data');
                     } catch (err) {
+                        debugLog('Error processing CPU/RAM: ' + err.message);
                         setStatus(`❌ Error processing CPU/RAM: ${err.message}`, 'error');
                         return;
                     }
@@ -751,7 +714,9 @@
                         reportData.network = result;
                         completedSteps++;
                         setProgress((completedSteps / totalSteps) * 100);
+                        debugLog('Processed network data');
                     } catch (err) {
+                        debugLog('Error processing network: ' + err.message);
                         setStatus(`❌ Error processing network: ${err.message}`, 'error');
                         return;
                     }
@@ -767,6 +732,8 @@
                 const jsonStr = JSON.stringify(reportData);
                 const compressed = await gzipCompress(jsonStr);
                 const b64 = btoa(String.fromCharCode(...compressed));
+
+                debugLog('Data compressed, size: ' + compressed.length + ' bytes');
 
                 // Inject data into template
                 let html = state.templateHtml;
@@ -786,8 +753,10 @@
                 generateBtn.disabled = true;
                 hideProgress();
                 
+                debugLog('Report generation complete');
+                
             } catch (err) {
-                console.error('Error generating report:', err);
+                debugLog('Error generating report: ' + err.message);
                 setStatus('❌ Error generating report: ' + err.message, 'error');
             }
         }
@@ -797,14 +766,14 @@
         // ============================================================
 
         async function init() {
-            console.log('Initializing...');
+            debugLog('Initializing...');
             
             // Load template first
             await loadTemplate();
             
             setStatus('Ready — upload your Parquet files', '');
             updateGenerateButton();
-            console.log('Initialization complete');
+            debugLog('Initialization complete');
         }
 
         // Start the app
